@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -30,6 +31,37 @@ def build_telegram_app(settings: Settings) -> Application:
 
 api = FastAPI()
 telegram_app: Application | None = None
+telegram_task: asyncio.Task | None = None
+
+
+async def init_telegram_in_background(settings: Settings) -> None:
+    """
+    Инициализация Telegram может включать сетевые вызовы (getMe/setWebhook).
+    Чтобы не мешать healthcheck'ам платформы, делаем это фоном.
+    """
+    global telegram_app
+    try:
+        app = build_telegram_app(settings)
+        await app.initialize()
+        await app.start()
+        telegram_app = app
+
+        try:
+            await telegram_app.bot.set_webhook(
+                url=settings.telegram_webhook_url,
+                secret_token=settings.telegram_webhook_secret_token,
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+            )
+            api.state.webhook_configured = True
+            api.state.webhook_error = None
+            logger.info("Webhook установлен: %s", settings.telegram_webhook_url)
+        except TelegramError as e:
+            api.state.webhook_configured = False
+            api.state.webhook_error = str(e)
+            logger.error("Не удалось установить webhook (%s): %s", settings.telegram_webhook_url, e)
+    except Exception:
+        logger.exception("Ошибка инициализации Telegram (ignore, сервис останется жив)")
 
 
 @api.get("/")
@@ -52,7 +84,7 @@ async def health() -> dict[str, object]:
 
 @api.on_event("startup")
 async def on_startup() -> None:
-    global telegram_app
+    global telegram_task
 
     settings, err = get_settings_or_error()
     api.state.webhook_configured = False
@@ -64,32 +96,19 @@ async def on_startup() -> None:
         logger.error("Config error. Set env vars in App Platform. Details: %s", err)
         return
 
-    telegram_app = build_telegram_app(settings)
-    await telegram_app.initialize()
-    await telegram_app.start()
-
-    # Настраиваем webhook на публичный URL приложения.
-    # Важно: Telegram будет присылать заголовок X-Telegram-Bot-Api-Secret-Token,
-    # мы его сверим в обработчике.
-    try:
-        await telegram_app.bot.set_webhook(
-            url=settings.telegram_webhook_url,
-            secret_token=settings.telegram_webhook_secret_token,
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-        )
-        api.state.webhook_configured = True
-        logger.info("Webhook установлен: %s", settings.telegram_webhook_url)
-    except TelegramError as e:
-        # Не роняем приложение: healthcheck должен пройти, а пользователь сможет
-        # поправить PUBLIC_BASE_URL/домен и сделать redeploy.
-        api.state.webhook_error = str(e)
-        logger.error("Не удалось установить webhook (%s): %s", settings.telegram_webhook_url, e)
+    # Фоновая инициализация Telegram, чтобы не блокировать readiness.
+    telegram_task = asyncio.create_task(init_telegram_in_background(settings))
 
 
 @api.on_event("shutdown")
 async def on_shutdown() -> None:
     global telegram_app
+    global telegram_task
+
+    if telegram_task is not None:
+        telegram_task.cancel()
+        telegram_task = None
+
     if telegram_app is None:
         return
 
