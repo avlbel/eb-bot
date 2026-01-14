@@ -61,7 +61,9 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
             },
         ],
         "temperature": 0.9,
-        "max_tokens": 80,
+        # Некоторые современные модели/провайдеры (в т.ч. через OpenAI-совместимые прокси)
+        # используют max_completion_tokens вместо max_tokens.
+        "max_completion_tokens": 80,
     }
 
     base = settings.timeweb_ai_base_url.rstrip("/")
