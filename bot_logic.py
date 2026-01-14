@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from dataclasses import dataclass
 
-import httpx
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -11,28 +13,81 @@ from timeweb_ai import TimewebAIError, generate_funny_caption
 
 logger = logging.getLogger(__name__)
 
-class TelegramAPIError(RuntimeError):
-    pass
+@dataclass(frozen=True)
+class DiscussionRef:
+    discussion_chat_id: int
+    discussion_message_id: int
+    ts: float
 
 
-async def _get_discussion_message_fallback(
-    bot_token: str,
-    channel_chat_id: int,
-    channel_message_id: int,
-) -> dict:
+# key: (channel_chat_id, channel_message_id) -> DiscussionRef
+_DISCUSSION_MAP: dict[tuple[int, int], DiscussionRef] = {}
+_DISCUSSION_TTL_S = 60 * 60  # 1 час достаточно
+
+
+def _discussion_map_put(channel_chat_id: int, channel_message_id: int, discussion_chat_id: int, discussion_message_id: int) -> None:
+    _DISCUSSION_MAP[(channel_chat_id, channel_message_id)] = DiscussionRef(
+        discussion_chat_id=discussion_chat_id,
+        discussion_message_id=discussion_message_id,
+        ts=time.time(),
+    )
+
+
+def _discussion_map_get(channel_chat_id: int, channel_message_id: int) -> DiscussionRef | None:
+    ref = _DISCUSSION_MAP.get((channel_chat_id, channel_message_id))
+    if ref is None:
+        return None
+    if time.time() - ref.ts > _DISCUSSION_TTL_S:
+        _DISCUSSION_MAP.pop((channel_chat_id, channel_message_id), None)
+        return None
+    return ref
+
+
+def _extract_origin_channel_and_msg_id(message) -> tuple[int, int] | None:
     """
-    Фолбэк на случай, если библиотека python-telegram-bot не содержит метода get_discussion_message.
-    Вызывает Telegram Bot API напрямую: getDiscussionMessage.
+    Пытаемся достать (channel_chat_id, channel_message_id) из автофорварда в linked-чате.
+    Поддерживаем разные версии Bot API / PTB: forward_from_chat + forward_from_message_id или forward_origin.
     """
-    url = f"https://api.telegram.org/bot{bot_token}/getDiscussionMessage"
-    data = {"chat_id": channel_chat_id, "message_id": channel_message_id}
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.post(url, data=data)
-        payload = r.json()
+    # legacy fields
+    fchat = getattr(message, "forward_from_chat", None)
+    fmid = getattr(message, "forward_from_message_id", None)
+    if fchat is not None and isinstance(getattr(fchat, "id", None), int) and isinstance(fmid, int):
+        return int(fchat.id), int(fmid)
 
-    if not payload.get("ok"):
-        raise TelegramAPIError(str(payload))
-    return payload["result"]
+    # newer: forward_origin (MessageOriginChannel)
+    origin = getattr(message, "forward_origin", None)
+    if origin is not None:
+        ochat = getattr(origin, "chat", None)
+        omid = getattr(origin, "message_id", None)
+        if ochat is not None and isinstance(getattr(ochat, "id", None), int) and isinstance(omid, int):
+            return int(ochat.id), int(omid)
+    return None
+
+
+async def handle_discussion_auto_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Когда включены комментарии, в linked discussion group появляется автофорвард поста канала.
+    Мы ловим его и сохраняем mapping: (channel_id, channel_msg_id) -> (discussion_chat_id, discussion_msg_id).
+    """
+    msg = update.effective_message
+    if msg is None or msg.chat is None:
+        return
+
+    # Нам нужны только автофорварды
+    if not getattr(msg, "is_automatic_forward", False):
+        return
+
+    origin = _extract_origin_channel_and_msg_id(msg)
+    if origin is None:
+        return
+
+    channel_chat_id, channel_message_id = origin
+    _discussion_map_put(
+        channel_chat_id=channel_chat_id,
+        channel_message_id=channel_message_id,
+        discussion_chat_id=msg.chat.id,
+        discussion_message_id=msg.message_id,
+    )
 
 
 async def handle_channel_photo_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -61,38 +116,29 @@ async def handle_channel_photo_post(update: Update, context: ContextTypes.DEFAUL
         logger.exception("Не удалось сгенерировать подпись через Timeweb AI")
         return
 
-    # Комментарии = сообщение в linked discussion group, ответом на "discussion message"
-    try:
-        if hasattr(context.bot, "get_discussion_message"):
-            discussion_message = await context.bot.get_discussion_message(
-                chat_id=msg.chat.id,
-                message_id=msg.message_id,
-            )
-            discussion_chat_id = discussion_message.chat.id
-            discussion_message_id = discussion_message.message_id
-        else:
-            # PTB-версии без обёртки — используем прямой вызов Telegram API
-            dm = await _get_discussion_message_fallback(
-                bot_token=settings.telegram_bot_token,
-                channel_chat_id=msg.chat.id,
-                channel_message_id=msg.message_id,
-            )
-            discussion_chat_id = int(dm["chat"]["id"])
-            discussion_message_id = int(dm["message_id"])
-    except Exception:
-        logger.exception(
-            "Не удалось получить discussion message. "
-            "Проверьте, что у канала включены комментарии (linked chat) и бот имеет доступ."
-        )
-        return
+    async def _try_send_comment_with_retries() -> None:
+        # Пытаемся дождаться, пока в linked-чате появится автофорвард (mapping).
+        delays = [0.5, 1, 2, 4, 8, 12]
+        for d in delays:
+            ref = _discussion_map_get(msg.chat.id, msg.message_id)
+            if ref is not None:
+                try:
+                    await context.bot.send_message(
+                        chat_id=ref.discussion_chat_id,
+                        text=caption,
+                        reply_to_message_id=ref.discussion_message_id,
+                        allow_sending_without_reply=True,
+                    )
+                except Exception:
+                    logger.exception("Не удалось отправить комментарий в чат обсуждений")
+                return
+            await asyncio.sleep(d)
 
-    try:
-        await context.bot.send_message(
-            chat_id=discussion_chat_id,
-            text=caption,
-            reply_to_message_id=discussion_message_id,
-            allow_sending_without_reply=True,
+        logger.error(
+            "Не найдено соответствие поста и сообщения в чате обсуждений. "
+            "Проверьте: включены комментарии (linked chat), бот добавлен в чат обсуждений и видит автофорварды."
         )
-    except Exception:
-        logger.exception("Не удалось отправить комментарий в чат обсуждений")
+
+    # Фоном, чтобы не задерживать обработку webhook
+    asyncio.create_task(_try_send_comment_with_retries())
 

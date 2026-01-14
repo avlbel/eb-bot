@@ -13,7 +13,7 @@ from telegram.error import TelegramError
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, MessageHandler, filters
 
-from bot_logic import handle_channel_photo_post
+from bot_logic import handle_channel_photo_post, handle_discussion_auto_forward
 from config import Settings, get_settings_or_error
 
 
@@ -64,6 +64,13 @@ def build_telegram_app(settings: Settings) -> Application:
         MessageHandler(
             filters.PHOTO & filters.ChatType.CHANNEL,
             handle_channel_photo_post,
+        )
+    )
+    # Ловим автофорварды в linked discussion group, чтобы связать пост и "discussion message"
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS,
+            handle_discussion_auto_forward,
         )
     )
     return app
