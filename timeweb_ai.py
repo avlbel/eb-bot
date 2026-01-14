@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from typing import Any
 
 import httpx
@@ -61,6 +62,30 @@ def _extract_text_from_chat_completions(data: dict[str, Any]) -> str:
                     continue
         return "\n".join(parts)
 
+    # tool calls (иногда content пустой, а ответ лежит в arguments)
+    tool_calls = msg.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function")
+            if not isinstance(fn, dict):
+                continue
+            args = fn.get("arguments")
+            if not isinstance(args, str) or not args.strip():
+                continue
+            # Попробуем распарсить JSON arguments и достать распространённые поля.
+            try:
+                obj = json.loads(args)
+                if isinstance(obj, dict):
+                    for k in ("caption", "text", "answer", "result", "output"):
+                        v = obj.get(k)
+                        if isinstance(v, str) and v.strip():
+                            return v
+            except Exception:
+                pass
+            return args
+
     return ""
 
 
@@ -84,25 +109,37 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
 
     settings = get_settings()
 
+    def _build_messages(include_image: bool, system_override: str | None = None) -> list[dict[str, Any]]:
+        system_text = system_override or (
+            "Ты остроумный русскоязычный автор подписей к картинкам. "
+            "Твоя задача — смешно, но без токсичности, оскорблений и политики. "
+            "Никаких лишних слов — только готовая подпись."
+        )
+
+        user_text = (
+            "Придумай одну короткую смешную подпись (до 120 символов) к картинке. "
+            "Верни только подпись, без кавычек, без хэштегов, без объяснений."
+        )
+        if original_caption:
+            user_text += f"\nКонтекст/подпись автора поста: {original_caption}"
+
+        if include_image:
+            user_content: Any = [
+                {"type": "text", "text": user_text},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]
+        else:
+            # Фолбэк: если vision не поддерживается — пусть хотя бы придумает подпись по контексту.
+            user_content = user_text + "\nЕсли ты не видишь изображение, всё равно верни смешную подпись."
+
+        return [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": user_content},
+        ]
+
     payload: dict[str, Any] = {
         "model": settings.timeweb_ai_model,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Ты остроумный русскоязычный автор подписей к картинкам. "
-                    "Твоя задача — смешно, но без токсичности, оскорблений и политики. "
-                    "Никаких лишних слов — только готовая подпись."
-                ),
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_text},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
+        "messages": _build_messages(include_image=bool(settings.timeweb_ai_send_image)),
         # Некоторые современные модели/провайдеры (в т.ч. через OpenAI-совместимые прокси)
         # используют max_completion_tokens вместо max_tokens.
         "max_completion_tokens": 80,
@@ -144,18 +181,18 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
     # Чуть-чуть «очистки», чтобы бот не прислал пустое или многословное.
     text = text.replace("\n", " ").strip()
 
-    # Если вдруг пришёл пустой текст (иногда бывает у прокси/агентов) — пробуем один ретрай
-    # с более жёсткой инструкцией.
+    # Если вдруг пришёл пустой текст (иногда бывает у прокси/агентов) — делаем ретраи:
+    # 1) более жёсткая инструкция
+    # 2) фолбэк без картинки (если vision не поддерживается)
     if not text:
         payload_retry = dict(payload)
-        payload_retry["messages"] = list(payload["messages"])
-        payload_retry["messages"][0] = {
-            "role": "system",
-            "content": (
+        payload_retry["messages"] = _build_messages(
+            include_image=bool(settings.timeweb_ai_send_image),
+            system_override=(
                 "Ты пишешь подписи к картинкам. Ответ НЕ может быть пустым. "
                 "Верни одну короткую подпись, только текст."
             ),
-        }
+        )
 
         async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
             r2 = await client.post(url, headers=headers, json=payload_retry)
@@ -164,8 +201,28 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
             data2 = r2.json()
         text = _extract_text_from_chat_completions(data2)
         text = (text or "").strip().replace("\n", " ").strip()
+
+        if not text and settings.timeweb_ai_send_image:
+            payload_retry2 = dict(payload)
+            payload_retry2["messages"] = _build_messages(include_image=False)
+            async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
+                r3 = await client.post(url, headers=headers, json=payload_retry2)
+                if r3.status_code >= 400:
+                    raise TimewebAIError(f"Timeweb AI HTTP {r3.status_code}: {r3.text[:500]}")
+                data3 = r3.json()
+            text = _extract_text_from_chat_completions(data3)
+            text = (text or "").strip().replace("\n", " ").strip()
+
         if not text:
-            raise TimewebAIError("AI вернул пустую подпись")
+            response_id = (
+                data.get("response_id")
+                or data.get("id")
+                or data.get("request_id")
+                or data.get("trace_id")
+                or data.get("x_request_id")
+            )
+            suffix = f" (response_id={response_id})" if response_id else ""
+            raise TimewebAIError(f"AI вернул пустую подпись{suffix}")
 
     return text[:400]
 
