@@ -14,5 +14,8 @@ COPY . /app/
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "uvicorn main:api --host 0.0.0.0 --port ${PORT}"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=6 \
+  CMD python -c "import os,urllib.request; p=os.getenv('PORT','8080'); urllib.request.urlopen(f'http://127.0.0.1:{p}/', timeout=2).read()"
+
+CMD ["sh", "-c", "uvicorn main:api --host 0.0.0.0 --port ${PORT} --access-log"]
 
