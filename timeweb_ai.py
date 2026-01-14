@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from typing import Any
 
 import httpx
@@ -13,6 +14,9 @@ class TimewebAIError(RuntimeError):
     pass
 
 
+logger = logging.getLogger(__name__)
+
+
 def _guess_mime(image_bytes: bytes) -> str:
     # Очень простой guess — достаточно для большинства фото из Telegram.
     if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -20,6 +24,35 @@ def _guess_mime(image_bytes: bytes) -> str:
     if image_bytes.startswith(b"\xff\xd8"):
         return "image/jpeg"
     return "application/octet-stream"
+
+
+def _extract_text_from_responses_api(data: dict[str, Any]) -> str:
+    """
+    OpenAI Responses API style:
+    - output_text: "..."
+    - output: [{type:"message", content:[{type:"output_text", text:"..."}]}]
+    """
+    ot = data.get("output_text")
+    if isinstance(ot, str) and ot.strip():
+        return ot
+
+    out = data.get("output")
+    if not isinstance(out, list):
+        return ""
+
+    parts: list[str] = []
+    for item in out:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for c in content:
+            if not isinstance(c, dict):
+                continue
+            if c.get("type") in ("output_text", "text") and isinstance(c.get("text"), str):
+                parts.append(c["text"])
+    return "\n".join(parts)
 
 
 def _extract_text_from_chat_completions(data: dict[str, Any]) -> str:
@@ -87,6 +120,27 @@ def _extract_text_from_chat_completions(data: dict[str, Any]) -> str:
             return args
 
     return ""
+
+
+def _response_meta(data: dict[str, Any]) -> dict[str, Any]:
+    """
+    Безопасная диагностика: только метаданные, без промптов/картинок.
+    """
+    meta: dict[str, Any] = {
+        "id": data.get("id") or data.get("response_id"),
+        "object": data.get("object"),
+        "model": data.get("model"),
+        "keys": sorted(list(data.keys()))[:50],
+    }
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        c0 = choices[0] if isinstance(choices[0], dict) else {}
+        meta["finish_reason"] = c0.get("finish_reason")
+        msg = c0.get("message") if isinstance(c0.get("message"), dict) else {}
+        meta["message_keys"] = sorted(list(msg.keys()))[:50] if isinstance(msg, dict) else None
+        # content может быть None/""/list — фиксируем тип
+        meta["content_type"] = type(msg.get("content")).__name__ if isinstance(msg, dict) else None
+    return meta
 
 
 async def generate_funny_caption(image_bytes: bytes, original_caption: str | None) -> str:
@@ -175,7 +229,10 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
 
         data = r.json()
 
+    # Сначала пробуем OpenAI chat.completions, затем Responses API (некоторые прокси так отвечают).
     text = _extract_text_from_chat_completions(data)
+    if not text:
+        text = _extract_text_from_responses_api(data)
 
     text = (text or "").strip()
     # Чуть-чуть «очистки», чтобы бот не прислал пустое или многословное.
@@ -199,7 +256,7 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
             if r2.status_code >= 400:
                 raise TimewebAIError(f"Timeweb AI HTTP {r2.status_code}: {r2.text[:500]}")
             data2 = r2.json()
-        text = _extract_text_from_chat_completions(data2)
+        text = _extract_text_from_chat_completions(data2) or _extract_text_from_responses_api(data2)
         text = (text or "").strip().replace("\n", " ").strip()
 
         if not text and settings.timeweb_ai_send_image:
@@ -210,7 +267,7 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
                 if r3.status_code >= 400:
                     raise TimewebAIError(f"Timeweb AI HTTP {r3.status_code}: {r3.text[:500]}")
                 data3 = r3.json()
-            text = _extract_text_from_chat_completions(data3)
+            text = _extract_text_from_chat_completions(data3) or _extract_text_from_responses_api(data3)
             text = (text or "").strip().replace("\n", " ").strip()
 
         if not text:
@@ -222,6 +279,11 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
                 or data.get("x_request_id")
             )
             suffix = f" (response_id={response_id})" if response_id else ""
+            # Пишем в лог безопасные метаданные ответа, чтобы понять формат/причину пустоты.
+            try:
+                logger.error("Timeweb AI empty response meta: %s", _response_meta(data))
+            except Exception:
+                pass
             raise TimewebAIError(f"AI вернул пустую подпись{suffix}")
 
     return text[:400]
