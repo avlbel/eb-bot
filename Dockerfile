@@ -11,11 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app/
 
 # Timeweb App Platform обычно прокидывает PORT, но оставим дефолт.
-ENV PORT=8080
 EXPOSE 8080
 
 HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=12 \
-  CMD ["python", "-c", "import os,urllib.request; p=os.getenv('PORT','8080'); urllib.request.urlopen('http://127.0.0.1:%s/'%p, timeout=2).read()"]
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=2).read()"]
 
-CMD ["sh", "-c", "uvicorn main:api --host 0.0.0.0 --port ${PORT} --access-log"]
+CMD ["sh", "-c", "uvicorn main:api --host 0.0.0.0 --port 8080 --access-log"]
 

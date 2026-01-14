@@ -105,6 +105,10 @@ async def on_startup() -> None:
         logger.error("Config error. Set env vars in App Platform. Details: %s", err)
         return
 
+    # Логируем fingerprint токена, чтобы было видно, какой токен реально подхватился из env.
+    token_fp = hashlib.sha256(settings.telegram_bot_token.encode("utf-8")).hexdigest()[:12]
+    logger.info("Bot token fingerprint: %s", token_fp)
+
     # Фоновая инициализация Telegram, чтобы не блокировать readiness.
     telegram_task = asyncio.create_task(init_telegram_in_background(settings))
 
