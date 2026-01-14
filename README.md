@@ -21,6 +21,7 @@
 - **`TELEGRAM_WEBHOOK_SECRET_TOKEN`**: секрет для заголовка Telegram `X-Telegram-Bot-Api-Secret-Token`
 - **`TIMEWEB_AI_API_KEY`**, **`TIMEWEB_AI_MODEL`**, **`TIMEWEB_AI_BASE_URL`**
 - **`TIMEWEB_AI_CHAT_PATH`**: путь к endpoint chat‑completions (по умолчанию `/v1/chat/completions`)
+- **`TELEGRAM_ALLOWED_CHANNEL_ID` / `TELEGRAM_ALLOWED_CHANNEL_IDS`**: ограничение на список разрешённых каналов (через запятую)
 
 ## Как работает привязка “пост → комментарии”
 

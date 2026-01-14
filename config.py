@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         ..., alias="TELEGRAM_WEBHOOK_SECRET_TOKEN"
     )  # проверяется по заголовку Telegram
     allowed_channel_id: int | None = Field(None, alias="TELEGRAM_ALLOWED_CHANNEL_ID")
+    allowed_channel_ids_raw: str | None = Field(None, alias="TELEGRAM_ALLOWED_CHANNEL_IDS")
 
     # Timeweb AI / OpenAI-совместимый API
     timeweb_ai_base_url: str = Field("https://api.timeweb.cloud", alias="TIMEWEB_AI_BASE_URL")
@@ -60,6 +61,29 @@ class Settings(BaseSettings):
     def telegram_webhook_url(self) -> str:
         base = self.public_base_url.rstrip("/")
         return f"{base}/webhook/{self.webhook_path_secret}"
+
+    @property
+    def allowed_channel_ids(self) -> set[int] | None:
+        """
+        Список разрешённых каналов (опционально).
+        Поддерживает TELEGRAM_ALLOWED_CHANNEL_ID и TELEGRAM_ALLOWED_CHANNEL_IDS (через запятую/пробел).
+        """
+        ids: set[int] = set()
+        if self.allowed_channel_id is not None:
+            ids.add(int(self.allowed_channel_id))
+
+        if self.allowed_channel_ids_raw:
+            parts = self.allowed_channel_ids_raw.replace(";", ",").replace("\n", ",").split(",")
+            for p in parts:
+                p = p.strip()
+                if not p:
+                    continue
+                try:
+                    ids.add(int(p))
+                except ValueError:
+                    continue
+
+        return ids if ids else None
 
 
 @lru_cache

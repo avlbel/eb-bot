@@ -130,8 +130,9 @@ async def handle_channel_photo_post(update: Update, context: ContextTypes.DEFAUL
     if msg is None or msg.chat is None:
         return
 
-    # Ограничение на конкретный канал (опционально)
-    if settings.allowed_channel_id is not None and msg.chat.id != settings.allowed_channel_id:
+    # Ограничение на список разрешённых каналов (опционально)
+    allowed_ids = settings.allowed_channel_ids
+    if allowed_ids is not None and msg.chat.id not in allowed_ids:
         return
 
     if not msg.photo:
