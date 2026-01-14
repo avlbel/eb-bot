@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -17,6 +18,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+# Не логируем HTTP-запросы библиотеки Telegram/httpx с URL, содержащим токен бота.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def build_telegram_app(settings: Settings) -> Application:
@@ -74,10 +78,14 @@ async def root() -> PlainTextResponse:
 @api.get("/health")
 async def health() -> dict[str, object]:
     settings, err = get_settings_or_error()
+    token_fp = None
+    if settings is not None and err is None:
+        token_fp = hashlib.sha256(settings.telegram_bot_token.encode("utf-8")).hexdigest()[:12]
     return {
         "status": "ok",
         "config_ok": err is None,
         "config_error": err,
+        "bot_token_fp": token_fp,
         "webhook_configured": bool(getattr(api.state, "webhook_configured", False)),
         "webhook_error": getattr(api.state, "webhook_error", None),
     }
