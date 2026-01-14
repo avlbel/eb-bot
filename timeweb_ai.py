@@ -76,6 +76,9 @@ def _extract_text_from_chat_completions(data: dict[str, Any]) -> str:
     content = msg.get("content")
 
     if isinstance(content, str):
+        # Некоторые прокси кладут отказ отдельно, а content оставляют пустым.
+        if not content.strip() and isinstance(msg.get("refusal"), str) and msg["refusal"].strip():
+            return msg["refusal"]
         return content
 
     # content as list of parts
@@ -120,6 +123,15 @@ def _extract_text_from_chat_completions(data: dict[str, Any]) -> str:
             return args
 
     return ""
+
+
+def _finish_reason_from_chat_completions(data: dict[str, Any]) -> str | None:
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        c0 = choices[0]
+        if isinstance(c0, dict) and isinstance(c0.get("finish_reason"), str):
+            return c0["finish_reason"]
+    return None
 
 
 def _response_meta(data: dict[str, Any]) -> dict[str, Any]:
@@ -196,7 +208,7 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
         "messages": _build_messages(include_image=bool(settings.timeweb_ai_send_image)),
         # Некоторые современные модели/провайдеры (в т.ч. через OpenAI-совместимые прокси)
         # используют max_completion_tokens вместо max_tokens.
-        "max_completion_tokens": 80,
+        "max_completion_tokens": int(settings.timeweb_ai_max_completion_tokens),
     }
     # Некоторые модели запрещают менять temperature (разрешено только значение по умолчанию).
     # Поэтому по умолчанию мы temperature НЕ отправляем.
@@ -242,6 +254,22 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
     # 1) более жёсткая инструкция
     # 2) фолбэк без картинки (если vision не поддерживается)
     if not text:
+        # Если модель отрезала ответ по длине ещё до появления текста — попробуем ретрай с большим лимитом.
+        finish_reason = _finish_reason_from_chat_completions(data)
+        if finish_reason == "length":
+            payload_more = dict(payload)
+            payload_more["max_completion_tokens"] = max(int(payload.get("max_completion_tokens", 0) or 0), 512)
+            async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
+                r_more = await client.post(url, headers=headers, json=payload_more)
+                if r_more.status_code >= 400:
+                    raise TimewebAIError(f"Timeweb AI HTTP {r_more.status_code}: {r_more.text[:500]}")
+                data_more = r_more.json()
+            text = (_extract_text_from_chat_completions(data_more) or _extract_text_from_responses_api(data_more)).strip()
+            text = text.replace("\n", " ").strip()
+
+        if text:
+            return text[:400]
+
         payload_retry = dict(payload)
         payload_retry["messages"] = _build_messages(
             include_image=bool(settings.timeweb_ai_send_image),
