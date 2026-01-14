@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from telegram.error import TelegramError
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, MessageHandler, filters
 
@@ -45,6 +46,7 @@ async def health() -> dict[str, object]:
         "config_ok": err is None,
         "config_error": err,
         "webhook_configured": bool(getattr(api.state, "webhook_configured", False)),
+        "webhook_error": getattr(api.state, "webhook_error", None),
     }
 
 
@@ -54,6 +56,7 @@ async def on_startup() -> None:
 
     settings, err = get_settings_or_error()
     api.state.webhook_configured = False
+    api.state.webhook_error = None
 
     if err is not None:
         # Важно: не валим приложение, чтобы healthcheck контейнера прошёл,
@@ -68,14 +71,20 @@ async def on_startup() -> None:
     # Настраиваем webhook на публичный URL приложения.
     # Важно: Telegram будет присылать заголовок X-Telegram-Bot-Api-Secret-Token,
     # мы его сверим в обработчике.
-    await telegram_app.bot.set_webhook(
-        url=settings.telegram_webhook_url,
-        secret_token=settings.telegram_webhook_secret_token,
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
-    )
-    api.state.webhook_configured = True
-    logger.info("Webhook установлен: %s", settings.telegram_webhook_url)
+    try:
+        await telegram_app.bot.set_webhook(
+            url=settings.telegram_webhook_url,
+            secret_token=settings.telegram_webhook_secret_token,
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+        )
+        api.state.webhook_configured = True
+        logger.info("Webhook установлен: %s", settings.telegram_webhook_url)
+    except TelegramError as e:
+        # Не роняем приложение: healthcheck должен пройти, а пользователь сможет
+        # поправить PUBLIC_BASE_URL/домен и сделать redeploy.
+        api.state.webhook_error = str(e)
+        logger.error("Не удалось установить webhook (%s): %s", settings.telegram_webhook_url, e)
 
 
 @api.on_event("shutdown")
