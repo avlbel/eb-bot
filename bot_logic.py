@@ -25,6 +25,40 @@ _DISCUSSION_MAP: dict[tuple[int, int], DiscussionRef] = {}
 _DISCUSSION_TTL_S = 60 * 60  # 1 час достаточно
 
 
+# Дедупликация: не отвечать на каждое фото в альбоме (media_group), а только один раз на пост.
+_PROCESSED_MEDIA_GROUPS: dict[str, float] = {}
+_MEDIA_GROUP_TTL_S = 6 * 60 * 60  # 6 часов
+
+# Дедупликация сообщений канала на случай повторной доставки апдейта
+_PROCESSED_CHANNEL_MESSAGES: dict[tuple[int, int], float] = {}
+_CHANNEL_MSG_TTL_S = 6 * 60 * 60
+
+
+def _is_recent(ts: float, ttl_s: float) -> bool:
+    return (time.time() - ts) <= ttl_s
+
+
+def _mark_processed_channel_message(chat_id: int, message_id: int) -> bool:
+    """
+    Возвращает True если сообщение уже обрабатывали (и его надо пропустить),
+    иначе помечает как обработанное и возвращает False.
+    """
+    key = (chat_id, message_id)
+    ts = _PROCESSED_CHANNEL_MESSAGES.get(key)
+    if ts is not None and _is_recent(ts, _CHANNEL_MSG_TTL_S):
+        return True
+    _PROCESSED_CHANNEL_MESSAGES[key] = time.time()
+    return False
+
+
+def _should_skip_media_group(media_group_id: str) -> bool:
+    ts = _PROCESSED_MEDIA_GROUPS.get(media_group_id)
+    if ts is not None and _is_recent(ts, _MEDIA_GROUP_TTL_S):
+        return True
+    _PROCESSED_MEDIA_GROUPS[media_group_id] = time.time()
+    return False
+
+
 def _discussion_map_put(channel_chat_id: int, channel_message_id: int, discussion_chat_id: int, discussion_message_id: int) -> None:
     _DISCUSSION_MAP[(channel_chat_id, channel_message_id)] = DiscussionRef(
         discussion_chat_id=discussion_chat_id,
@@ -102,6 +136,16 @@ async def handle_channel_photo_post(update: Update, context: ContextTypes.DEFAUL
 
     if not msg.photo:
         return
+
+    # Не отвечаем несколько раз на один и тот же пост (на случай дублей апдейтов)
+    if _mark_processed_channel_message(msg.chat.id, msg.message_id):
+        return
+
+    # Если это альбом (несколько картинок = media_group_id), отвечаем только один раз — на первую пришедшую картинку.
+    media_group_id = getattr(msg, "media_group_id", None)
+    if isinstance(media_group_id, str) and media_group_id:
+        if _should_skip_media_group(media_group_id):
+            return
 
     # Берём самое большое фото
     photo = msg.photo[-1]
