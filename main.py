@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from telegram.error import TelegramError
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, MessageHandler, filters
@@ -65,9 +66,9 @@ async def init_telegram_in_background(settings: Settings) -> None:
 
 
 @api.get("/")
-async def root() -> dict[str, str]:
+async def root() -> PlainTextResponse:
     # Многие платформы по умолчанию проверяют именно "/" как healthcheck.
-    return {"status": "ok"}
+    return PlainTextResponse("OK")
 
 
 @api.get("/health")
