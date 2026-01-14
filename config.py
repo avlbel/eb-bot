@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from pydantic import Field
+from pydantic import field_validator
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,7 +14,12 @@ class Settings(BaseSettings):
     Для локального запуска можно создать .env (не коммитить).
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        str_strip_whitespace=True,
+    )
 
     # Telegram
     telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
@@ -32,6 +38,19 @@ class Settings(BaseSettings):
 
     # Поведение генерации
     caption_language: str = Field("ru", alias="CAPTION_LANGUAGE")
+
+    @field_validator("telegram_bot_token", mode="before")
+    @classmethod
+    def _normalize_bot_token(cls, v: str) -> str:
+        # Частая проблема в панелях деплоя: пробелы/переносы/кавычки.
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            v = str(v)
+        v = v.strip()
+        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+            v = v[1:-1].strip()
+        return v
 
     @property
     def telegram_webhook_url(self) -> str:
