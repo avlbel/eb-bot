@@ -5,6 +5,7 @@ import hashlib
 import logging
 import os
 import re
+import uuid
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -48,6 +49,8 @@ logging.getLogger("httpcore").disabled = True
 
 # Диагностика самого раннего старта: какой TELEGRAM_BOT_TOKEN реально попал в env контейнера.
 _raw_boot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+_instance_id = os.getenv("INSTANCE_ID") or str(uuid.uuid4())
+print(f"BOOT INSTANCE_ID: {_instance_id}", flush=True)
 if _raw_boot_token:
     _boot_fp = hashlib.sha256(_raw_boot_token.encode("utf-8")).hexdigest()[:12]
     print(f"BOOT TELEGRAM_BOT_TOKEN fingerprint: {_boot_fp}", flush=True)
@@ -104,7 +107,7 @@ async def init_telegram_in_background(settings: Settings) -> None:
 @api.get("/")
 async def root() -> PlainTextResponse:
     # Многие платформы по умолчанию проверяют именно "/" как healthcheck.
-    return PlainTextResponse("OK")
+    return PlainTextResponse(f"OK {_instance_id}")
 
 
 @api.get("/health")
@@ -115,6 +118,7 @@ async def health() -> dict[str, object]:
         token_fp = hashlib.sha256(settings.telegram_bot_token.encode("utf-8")).hexdigest()[:12]
     return {
         "status": "ok",
+        "instance_id": _instance_id,
         "config_ok": err is None,
         "config_error": err,
         "bot_token_fp": token_fp,
