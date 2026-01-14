@@ -5,13 +5,14 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import settings
+from config import get_settings
 from timeweb_ai import TimewebAIError, generate_funny_caption
 
 logger = logging.getLogger(__name__)
 
 
 async def handle_channel_photo_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = get_settings()
     msg = update.effective_message
     if msg is None or msg.chat is None:
         return

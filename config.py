@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from functools import lru_cache
+
 from pydantic import Field
+from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,5 +39,17 @@ class Settings(BaseSettings):
         return f"{base}/webhook/{self.webhook_path_secret}"
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+def get_settings_or_error() -> tuple[Settings | None, str | None]:
+    """
+    Для healthcheck/стартов: вернуть (settings, None) либо (None, str_error).
+    """
+    try:
+        return get_settings(), None
+    except ValidationError as e:
+        return None, str(e)
 

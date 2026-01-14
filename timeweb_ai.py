@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from config import settings
+from config import get_settings
 
 
 class TimewebAIError(RuntimeError):
@@ -38,6 +38,8 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
     )
     if original_caption:
         user_text += f"\nКонтекст/подпись автора поста: {original_caption}"
+
+    settings = get_settings()
 
     payload: dict[str, Any] = {
         "model": settings.timeweb_ai_model,
