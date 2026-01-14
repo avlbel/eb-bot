@@ -20,6 +20,7 @@
 - **`TELEGRAM_WEBHOOK_PATH_SECRET`**: секрет в пути вебхука
 - **`TELEGRAM_WEBHOOK_SECRET_TOKEN`**: секрет для заголовка Telegram `X-Telegram-Bot-Api-Secret-Token`
 - **`TIMEWEB_AI_API_KEY`**, **`TIMEWEB_AI_MODEL`**, **`TIMEWEB_AI_BASE_URL`**
+- **`TIMEWEB_AI_CHAT_PATH`**: путь к endpoint chat‑completions (по умолчанию `/v1/chat/completions`)
 
 ## Как работает привязка “пост → комментарии”
 
@@ -72,7 +73,7 @@ uvicorn main:api --host 0.0.0.0 --port 8080
 
 В `timeweb_ai.py` используется **OpenAI‑совместимый** вызов:
 
-- `POST {TIMEWEB_AI_BASE_URL}/v1/chat/completions`
+- `POST {TIMEWEB_AI_BASE_URL}{TIMEWEB_AI_CHAT_PATH}`
 - `Authorization: Bearer {TIMEWEB_AI_API_KEY}`
 - `model = TIMEWEB_AI_MODEL`
 - картинка отправляется как `data:image/...;base64,...` (vision)

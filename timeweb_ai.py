@@ -64,7 +64,11 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
         "max_tokens": 80,
     }
 
-    url = settings.timeweb_ai_base_url.rstrip("/") + "/v1/chat/completions"
+    base = settings.timeweb_ai_base_url.rstrip("/")
+    path = settings.timeweb_ai_chat_path.strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    url = base + path
     headers = {
         "Authorization": f"Bearer {settings.timeweb_ai_api_key}",
         "Content-Type": "application/json",
@@ -73,7 +77,12 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
     async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
         r = await client.post(url, headers=headers, json=payload)
         if r.status_code >= 400:
-            raise TimewebAIError(f"Timeweb AI HTTP {r.status_code}: {r.text[:500]}")
+            hint = ""
+            if r.status_code == 404:
+                hint = (
+                    f" (проверьте TIMEWEB_AI_BASE_URL/TIMEWEB_AI_CHAT_PATH; текущий URL: {url})"
+                )
+            raise TimewebAIError(f"Timeweb AI HTTP {r.status_code}: {r.text[:500]}{hint}")
         data = r.json()
 
     # OpenAI-style: choices[0].message.content
