@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -14,11 +15,31 @@ from telegram.ext import Application, ApplicationBuilder, MessageHandler, filter
 from bot_logic import handle_channel_photo_post
 from config import Settings, get_settings_or_error
 
+
+class _RedactTelegramTokenFilter(logging.Filter):
+    _re = re.compile(r"(https://api\.telegram\.org/)?bot\d+:[A-Za-z0-9_-]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+
+        redacted = self._re.sub("bot<redacted>", msg)
+        if redacted != msg:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+# Редактируем логи, чтобы токены Telegram не утекали (URL httpx, тексты исключений и т.д.)
+for h in logging.getLogger().handlers:
+    h.addFilter(_RedactTelegramTokenFilter())
 # Не логируем HTTP-запросы библиотеки Telegram/httpx с URL, содержащим токен бота.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
