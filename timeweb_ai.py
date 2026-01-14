@@ -60,11 +60,14 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
                 ],
             },
         ],
-        "temperature": 0.9,
         # Некоторые современные модели/провайдеры (в т.ч. через OpenAI-совместимые прокси)
         # используют max_completion_tokens вместо max_tokens.
         "max_completion_tokens": 80,
     }
+    # Некоторые модели запрещают менять temperature (разрешено только значение по умолчанию).
+    # Поэтому по умолчанию мы temperature НЕ отправляем.
+    if settings.timeweb_ai_temperature is not None:
+        payload["temperature"] = settings.timeweb_ai_temperature
 
     base = settings.timeweb_ai_base_url.rstrip("/")
     path = settings.timeweb_ai_chat_path.strip()
@@ -78,13 +81,18 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
 
     async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
         r = await client.post(url, headers=headers, json=payload)
+
+        # Если модель ругается на temperature — пробуем один раз без него.
+        if r.status_code == 400 and "temperature" in r.text and "Only the default" in r.text:
+            payload.pop("temperature", None)
+            r = await client.post(url, headers=headers, json=payload)
+
         if r.status_code >= 400:
             hint = ""
             if r.status_code == 404:
-                hint = (
-                    f" (проверьте TIMEWEB_AI_BASE_URL/TIMEWEB_AI_CHAT_PATH; текущий URL: {url})"
-                )
+                hint = f" (проверьте TIMEWEB_AI_BASE_URL/TIMEWEB_AI_CHAT_PATH; текущий URL: {url})"
             raise TimewebAIError(f"Timeweb AI HTTP {r.status_code}: {r.text[:500]}{hint}")
+
         data = r.json()
 
     # OpenAI-style: choices[0].message.content

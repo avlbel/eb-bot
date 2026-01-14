@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     timeweb_ai_api_key: str = Field(..., alias="TIMEWEB_AI_API_KEY")
     timeweb_ai_model: str = Field(..., alias="TIMEWEB_AI_MODEL")
     timeweb_ai_timeout_s: float = Field(30.0, alias="TIMEWEB_AI_TIMEOUT_S")
+    timeweb_ai_temperature: float | None = Field(None, alias="TIMEWEB_AI_TEMPERATURE")
 
     # Поведение генерации
     caption_language: str = Field("ru", alias="CAPTION_LANGUAGE")
