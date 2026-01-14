@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -21,6 +22,16 @@ logger = logging.getLogger(__name__)
 # Не логируем HTTP-запросы библиотеки Telegram/httpx с URL, содержащим токен бота.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").disabled = True
+logging.getLogger("httpcore").disabled = True
+
+# Диагностика самого раннего старта: какой TELEGRAM_BOT_TOKEN реально попал в env контейнера.
+_raw_boot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+if _raw_boot_token:
+    _boot_fp = hashlib.sha256(_raw_boot_token.encode("utf-8")).hexdigest()[:12]
+    print(f"BOOT TELEGRAM_BOT_TOKEN fingerprint: {_boot_fp}", flush=True)
+else:
+    print("BOOT TELEGRAM_BOT_TOKEN fingerprint: <missing>", flush=True)
 
 
 def build_telegram_app(settings: Settings) -> Application:
