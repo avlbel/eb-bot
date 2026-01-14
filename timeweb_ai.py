@@ -21,6 +21,49 @@ def _guess_mime(image_bytes: bytes) -> str:
     return "application/octet-stream"
 
 
+def _extract_text_from_chat_completions(data: dict[str, Any]) -> str:
+    """
+    Поддержка вариаций OpenAI-style ответа:
+    - choices[0].message.content: str
+    - choices[0].message.content: [{"type":"text","text":"..."}]
+    - choices[0].text (редко/legacy)
+    """
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+
+    c0 = choices[0] or {}
+
+    # legacy
+    if isinstance(c0.get("text"), str):
+        return c0["text"]
+
+    msg = c0.get("message") or {}
+    content = msg.get("content")
+
+    if isinstance(content, str):
+        return content
+
+    # content as list of parts
+    if isinstance(content, list):
+        parts: list[str] = []
+        for p in content:
+            if isinstance(p, str):
+                parts.append(p)
+                continue
+            if isinstance(p, dict):
+                if isinstance(p.get("text"), str):
+                    parts.append(p["text"])
+                    continue
+                # иногда встречается {"type":"text","content":"..."}
+                if isinstance(p.get("content"), str):
+                    parts.append(p["content"])
+                    continue
+        return "\n".join(parts)
+
+    return ""
+
+
 async def generate_funny_caption(image_bytes: bytes, original_caption: str | None) -> str:
     """
     Пытаемся получить 1 короткую смешную подпись к картинке через AI-агента Timeweb.
@@ -95,16 +138,34 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
 
         data = r.json()
 
-    # OpenAI-style: choices[0].message.content
-    try:
-        text = data["choices"][0]["message"]["content"]
-    except Exception as e:  # noqa: BLE001
-        raise TimewebAIError(f"Неожиданный формат ответа Timeweb AI: {data}") from e
+    text = _extract_text_from_chat_completions(data)
 
     text = (text or "").strip()
     # Чуть-чуть «очистки», чтобы бот не прислал пустое или многословное.
     text = text.replace("\n", " ").strip()
+
+    # Если вдруг пришёл пустой текст (иногда бывает у прокси/агентов) — пробуем один ретрай
+    # с более жёсткой инструкцией.
     if not text:
-        raise TimewebAIError("AI вернул пустую подпись")
+        payload_retry = dict(payload)
+        payload_retry["messages"] = list(payload["messages"])
+        payload_retry["messages"][0] = {
+            "role": "system",
+            "content": (
+                "Ты пишешь подписи к картинкам. Ответ НЕ может быть пустым. "
+                "Верни одну короткую подпись, только текст."
+            ),
+        }
+
+        async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
+            r2 = await client.post(url, headers=headers, json=payload_retry)
+            if r2.status_code >= 400:
+                raise TimewebAIError(f"Timeweb AI HTTP {r2.status_code}: {r2.text[:500]}")
+            data2 = r2.json()
+        text = _extract_text_from_chat_completions(data2)
+        text = (text or "").strip().replace("\n", " ").strip()
+        if not text:
+            raise TimewebAIError("AI вернул пустую подпись")
+
     return text[:400]
 
