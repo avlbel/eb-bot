@@ -79,6 +79,17 @@ def _extract_text_from_chat_completions(data: dict[str, Any]) -> str:
         # Некоторые прокси кладут отказ отдельно, а content оставляют пустым.
         if not content.strip() and isinstance(msg.get("refusal"), str) and msg["refusal"].strip():
             return msg["refusal"]
+        # Иногда текст попадает в annotations.
+        if not content.strip():
+            ann = msg.get("annotations")
+            if isinstance(ann, list):
+                for a in ann:
+                    if not isinstance(a, dict):
+                        continue
+                    for k in ("text", "content", "annotation", "value", "message"):
+                        v = a.get(k)
+                        if isinstance(v, str) and v.strip():
+                            return v
         return content
 
     # content as list of parts
@@ -152,6 +163,13 @@ def _response_meta(data: dict[str, Any]) -> dict[str, Any]:
         meta["message_keys"] = sorted(list(msg.keys()))[:50] if isinstance(msg, dict) else None
         # content может быть None/""/list — фиксируем тип
         meta["content_type"] = type(msg.get("content")).__name__ if isinstance(msg, dict) else None
+        if isinstance(msg, dict):
+            c = msg.get("content")
+            r = msg.get("refusal")
+            meta["content_len"] = len(c) if isinstance(c, str) else None
+            meta["refusal_len"] = len(r) if isinstance(r, str) else None
+            ann = msg.get("annotations")
+            meta["annotations_len"] = len(ann) if isinstance(ann, list) else None
     return meta
 
 
@@ -258,7 +276,7 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
         finish_reason = _finish_reason_from_chat_completions(data)
         if finish_reason == "length":
             payload_more = dict(payload)
-            payload_more["max_completion_tokens"] = max(int(payload.get("max_completion_tokens", 0) or 0), 512)
+            payload_more["max_completion_tokens"] = max(int(payload.get("max_completion_tokens", 0) or 0), 2048)
             async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
                 r_more = await client.post(url, headers=headers, json=payload_more)
                 if r_more.status_code >= 400:
