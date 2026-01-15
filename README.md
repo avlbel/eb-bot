@@ -106,3 +106,35 @@ uvicorn main:api --host 0.0.0.0 --port 8080
 - `DAILY_POLL_QUESTIONS=Что тут происходит?|Что делать дальше?|...`
 
 Для режима опросов нужен Postgres. Параметры подключения — в `env.example`.
+
+## Структура базы данных (Postgres)
+
+Таблица `posts` — хранит посты с картинками (для опросов и статистики):
+
+- `id` BIGSERIAL PK
+- `channel_id` BIGINT
+- `message_id` BIGINT
+- `post_date` DATE (в TZ `Europe/Moscow`)
+- `photo_file_id` TEXT
+- `created_at` TIMESTAMPTZ
+- UNIQUE `(channel_id, message_id)`
+
+Таблица `daily_poll` — состояние дневного опроса по каналу:
+
+- `channel_id` BIGINT
+- `poll_date` DATE
+- `scheduled_at` TIMESTAMPTZ
+- `posted_at` TIMESTAMPTZ NULL
+- `skipped_at` TIMESTAMPTZ NULL
+- `poll_message_id` BIGINT NULL
+- `chosen_post_message_id` BIGINT NULL
+- `question` TEXT
+- `options` JSONB
+- PRIMARY KEY `(channel_id, poll_date)`
+
+## Очистка таблиц
+
+- `posts`: чистится **при первом посте нового дня** — удаляются записи старше 30 дней.
+- `daily_poll`: текущая логика **не удаляет** строки автоматически, чтобы можно было смотреть историю.
+  Если захотите авто‑чистку, можно добавить, например:
+  - хранить 30–60 дней: `DELETE FROM daily_poll WHERE poll_date < CURRENT_DATE - INTERVAL '60 days'`.
