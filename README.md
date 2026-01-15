@@ -23,6 +23,7 @@
 - **`TIMEWEB_AI_CHAT_PATH`**: путь к endpoint chat‑completions (по умолчанию `/v1/chat/completions`)
 - **`TELEGRAM_ALLOWED_CHANNEL_ID` / `TELEGRAM_ALLOWED_CHANNEL_IDS`**: ограничение на список разрешённых каналов (через запятую)
 - **`TIMEWEB_AI_USE_POST_CAPTION`**: использовать подпись поста как контекст (по умолчанию `true`)
+- **`TIMEWEB_AI_EMOJI_RATIO`**: доля emoji‑реакций (0.0..1.0), по умолчанию `0.3`
 
 ## Как работает привязка “пост → комментарии”
 

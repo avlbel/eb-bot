@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import random
 from typing import Any
 
 import httpx
@@ -193,17 +194,27 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
 
     settings = get_settings()
 
-    def _build_messages(include_image: bool, system_override: str | None = None) -> list[dict[str, Any]]:
+    def _build_messages(
+        include_image: bool,
+        system_override: str | None = None,
+        emoji_mode: bool = False,
+    ) -> list[dict[str, Any]]:
         system_text = system_override or (
             "Ты остроумный русскоязычный автор подписей к картинкам. "
             "Твоя задача — смешно, но без токсичности, оскорблений и политики. "
             "Никаких лишних слов — только готовая подпись."
         )
 
-        user_text = (
-            "Придумай одну короткую смешную подпись (до 120 символов) к картинке. "
-            "Верни только подпись, без кавычек, без хэштегов, без объяснений."
-        )
+        if emoji_mode:
+            user_text = (
+                "Сделай emoji-реакцию на картинку: 3–5 эмодзи + короткая подпись. "
+                "Верни одну строку, без кавычек и хэштегов."
+            )
+        else:
+            user_text = (
+                "Придумай одну короткую смешную подпись (до 120 символов) к картинке. "
+                "Верни только подпись, без кавычек, без хэштегов, без объяснений."
+            )
         if settings.timeweb_ai_use_post_caption and original_caption:
             user_text += f"\nКонтекст/подпись автора поста: {original_caption}"
 
@@ -221,9 +232,16 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
             {"role": "user", "content": user_content},
         ]
 
+    # Случайно выбираем режим: обычная подпись или emoji-реакция.
+    ratio = max(0.0, min(1.0, float(settings.timeweb_ai_emoji_ratio)))
+    emoji_mode = random.random() < ratio
+
     payload: dict[str, Any] = {
         "model": settings.timeweb_ai_model,
-        "messages": _build_messages(include_image=bool(settings.timeweb_ai_send_image)),
+        "messages": _build_messages(
+            include_image=bool(settings.timeweb_ai_send_image),
+            emoji_mode=emoji_mode,
+        ),
         # Некоторые современные модели/провайдеры (в т.ч. через OpenAI-совместимые прокси)
         # используют max_completion_tokens вместо max_tokens.
         "max_completion_tokens": int(settings.timeweb_ai_max_completion_tokens),
@@ -295,6 +313,7 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
                 "Ты пишешь подписи к картинкам. Ответ НЕ может быть пустым. "
                 "Верни одну короткую подпись, только текст."
             ),
+            emoji_mode=emoji_mode,
         )
 
         async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
@@ -307,7 +326,7 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
 
         if not text and settings.timeweb_ai_send_image:
             payload_retry2 = dict(payload)
-            payload_retry2["messages"] = _build_messages(include_image=False)
+            payload_retry2["messages"] = _build_messages(include_image=False, emoji_mode=emoji_mode)
             async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
                 r3 = await client.post(url, headers=headers, json=payload_retry2)
                 if r3.status_code >= 400:

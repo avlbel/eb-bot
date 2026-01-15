@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     timeweb_ai_send_image: bool = Field(True, alias="TIMEWEB_AI_SEND_IMAGE")
     timeweb_ai_max_completion_tokens: int = Field(256, alias="TIMEWEB_AI_MAX_COMPLETION_TOKENS")
     timeweb_ai_use_post_caption: bool = Field(True, alias="TIMEWEB_AI_USE_POST_CAPTION")
+    timeweb_ai_emoji_ratio: float = Field(0.3, alias="TIMEWEB_AI_EMOJI_RATIO")
 
     # Поведение генерации
     caption_language: str = Field("ru", alias="CAPTION_LANGUAGE")
