@@ -66,8 +66,8 @@ async def maybe_cleanup_old_posts(pool: asyncpg.Pool, today: date, days: int = 3
         if exists:
             return
         await conn.execute(
-            "DELETE FROM posts WHERE created_at < (NOW() - ($1::text || ' days')::interval)",
-            days,
+            "DELETE FROM posts WHERE created_at < (NOW() - make_interval(days => $1))",
+            int(days),
         )
 
 
