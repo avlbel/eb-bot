@@ -26,6 +26,7 @@ async def poller_loop(state) -> None:
     """
     Фоновый планировщик ежедневных опросов.
     """
+    logger.info("Poller loop initialized")
     while True:
         try:
             await run_poll_once(state)
@@ -49,7 +50,6 @@ async def run_poll_once(state) -> None:
 
     app = getattr(state, "telegram_app", None)
     if app is None:
-        logger.warning("Daily poll enabled but telegram_app is not ready yet")
         return
 
     now_utc = utc_now()

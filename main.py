@@ -89,7 +89,7 @@ async def init_telegram_in_background(settings: Settings) -> None:
     Инициализация Telegram может включать сетевые вызовы (getMe/setWebhook).
     Чтобы не мешать healthcheck'ам платформы, делаем это фоном.
     """
-    global telegram_app
+    global telegram_app, poller_task
     try:
         app = build_telegram_app(settings)
         await app.initialize()
@@ -99,6 +99,11 @@ async def init_telegram_in_background(settings: Settings) -> None:
         # пробрасываем pool в bot_data, чтобы handlers могли писать в БД
         if getattr(api.state, "db_pool", None) is not None:
             app.bot_data["db_pool"] = api.state.db_pool
+
+        # Стартуем poller после готовности telegram_app
+        if poller_task is None:
+            poller_task = asyncio.create_task(poller_loop(api.state))
+            logger.info("Poller started")
 
         try:
             await telegram_app.bot.set_webhook(
@@ -172,9 +177,6 @@ async def on_startup() -> None:
 
     # Фоновая инициализация Telegram, чтобы не блокировать readiness.
     telegram_task = asyncio.create_task(init_telegram_in_background(settings))
-
-    # Фоновый планировщик опросов
-    poller_task = asyncio.create_task(poller_loop(api.state))
 
 
 @api.on_event("shutdown")
