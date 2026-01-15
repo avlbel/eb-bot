@@ -4,12 +4,19 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import get_settings
-from timeweb_ai import TimewebAIError, generate_funny_caption
+from timeweb_ai import TimewebAIError, generate_funny_caption, generate_poll_options
+
+from db import (
+    ensure_daily_poll,
+    maybe_cleanup_old_posts,
+    record_post,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +64,57 @@ def _should_skip_media_group(media_group_id: str) -> bool:
         return True
     _PROCESSED_MEDIA_GROUPS[media_group_id] = time.time()
     return False
+
+
+async def _record_post_for_poll_if_needed(
+    context: ContextTypes.DEFAULT_TYPE,
+    channel_id: int,
+    message_id: int,
+    post_date,
+    photo_file_id: str | None,
+) -> None:
+    settings = get_settings()
+    pool = getattr(getattr(context, "application", None), "bot_data", {}).get("db_pool")
+    if pool is None:
+        return
+
+    # Записываем посты для статистики всегда, если есть БД
+    await maybe_cleanup_old_posts(pool, post_date, days=30)
+    await record_post(pool, channel_id, message_id, post_date, photo_file_id)
+
+    # Планируем опрос только для строго заданных каналов и при включённом режиме
+    if not settings.daily_poll_enabled:
+        return
+    poll_channels = settings.daily_poll_channel_ids
+    if not poll_channels or channel_id not in poll_channels:
+        return
+
+    # Планируем poll на сегодня, если ещё не создан
+    await _ensure_poll_scheduled(pool, channel_id, post_date)
+
+
+async def _ensure_poll_scheduled(pool, channel_id: int, poll_date) -> None:
+    settings = get_settings()
+    from datetime import datetime, time as dtime
+    from zoneinfo import ZoneInfo
+    import random
+
+    tz = ZoneInfo(settings.daily_poll_timezone)
+    start = dtime(hour=settings.daily_poll_start_hour, minute=0)
+    end = dtime(hour=settings.daily_poll_end_hour, minute=0)
+
+    # случайный момент в диапазоне
+    start_dt = datetime.combine(poll_date, start, tzinfo=tz)
+    end_dt = datetime.combine(poll_date, end, tzinfo=tz)
+    if end_dt <= start_dt:
+        end_dt = start_dt
+
+    delta = (end_dt - start_dt).total_seconds()
+    offset = random.uniform(0, max(delta, 0))
+    scheduled_local = start_dt + timedelta(seconds=offset)
+    scheduled_utc = scheduled_local.astimezone(timezone.utc)
+
+    await ensure_daily_poll(pool, channel_id, poll_date, scheduled_utc)
 
 
 def _discussion_map_put(channel_chat_id: int, channel_message_id: int, discussion_chat_id: int, discussion_message_id: int) -> None:
@@ -150,7 +208,25 @@ async def handle_channel_photo_post(update: Update, context: ContextTypes.DEFAUL
 
     # Берём самое большое фото
     photo = msg.photo[-1]
-    tg_file = await context.bot.get_file(photo.file_id)
+    photo_file_id = photo.file_id
+
+    # Запись в БД (для режима дневных опросов/статистики)
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(settings.daily_poll_timezone)
+        post_date = (msg.date.astimezone(tz) if msg.date else datetime.now(tz)).date()
+        await _record_post_for_poll_if_needed(
+            context=context,
+            channel_id=msg.chat.id,
+            message_id=msg.message_id,
+            post_date=post_date,
+            photo_file_id=photo_file_id,
+        )
+    except Exception:
+        logger.exception("Не удалось записать пост в БД для режима опросов")
+
+    tg_file = await context.bot.get_file(photo_file_id)
     image_bytes = bytes(await tg_file.download_as_bytearray())
 
     original_caption = msg.caption

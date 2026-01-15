@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import random
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
+
+from telegram.error import TelegramError
+
+from config import get_settings
+from db import (
+    count_posts_for_date,
+    get_due_polls,
+    mark_poll_posted,
+    mark_poll_skipped,
+    pick_random_post,
+    utc_now,
+)
+from timeweb_ai import TimewebAIError, generate_poll_options
+
+logger = logging.getLogger(__name__)
+
+
+async def poller_loop(state) -> None:
+    """
+    Фоновый планировщик ежедневных опросов.
+    """
+    while True:
+        try:
+            await run_poll_once(state)
+        except Exception:
+            logger.exception("Poller loop error")
+        await asyncio.sleep(60)
+
+
+async def run_poll_once(state) -> None:
+    settings = get_settings()
+    pool = getattr(state, "db_pool", None)
+    if pool is None or not settings.daily_poll_enabled:
+        return
+
+    poll_channels = settings.daily_poll_channel_ids
+    if not poll_channels:
+        return
+
+    app = getattr(state, "telegram_app", None)
+    if app is None:
+        return
+
+    now_utc = utc_now()
+    due = await get_due_polls(pool, now_utc)
+    if not due:
+        return
+
+    tz = ZoneInfo(settings.daily_poll_timezone)
+    start_t = dtime(hour=settings.daily_poll_start_hour, minute=0)
+    end_t = dtime(hour=settings.daily_poll_end_hour, minute=0)
+
+    for row in due:
+        channel_id = int(row["channel_id"])
+        poll_date = row["poll_date"]
+
+        if channel_id not in poll_channels:
+            continue
+
+        # окно публикации
+        start_dt = datetime.combine(poll_date, start_t, tzinfo=tz)
+        end_dt = datetime.combine(poll_date, end_t, tzinfo=tz)
+        now_local = datetime.now(tz)
+        if now_local > end_dt:
+            # Если окно уже прошло — помечаем как пропущенный опрос.
+            await mark_poll_skipped(pool, channel_id, poll_date)
+            continue
+
+        # Нужно минимум N постов за день
+        posts_count = await count_posts_for_date(pool, channel_id, poll_date)
+        if posts_count < settings.daily_poll_min_posts:
+            continue
+
+        post = await pick_random_post(pool, channel_id, poll_date)
+        if not post:
+            continue
+
+        photo_file_id = post.get("photo_file_id")
+        if not photo_file_id:
+            continue
+
+        # Загружаем картинку
+        try:
+            tg_file = await app.bot.get_file(photo_file_id)
+            image_bytes = bytes(await tg_file.download_as_bytearray())
+        except TelegramError:
+            logger.exception("Не удалось скачать картинку для опроса")
+            continue
+
+        # Вопрос — фиксированный список
+        question = random.choice(settings.daily_poll_questions)
+
+        try:
+            options = await generate_poll_options(
+                image_bytes=image_bytes,
+                question=question,
+                options_count=settings.daily_poll_options_count,
+            )
+        except TimewebAIError:
+            logger.exception("Не удалось сгенерировать варианты опроса через AI")
+            continue
+
+        try:
+            poll_msg = await app.bot.send_poll(
+                chat_id=channel_id,
+                question=question,
+                options=options,
+                is_anonymous=False,
+                allows_multiple_answers=False,
+                open_period=settings.daily_poll_open_seconds,
+            )
+        except TelegramError:
+            logger.exception("Не удалось отправить опрос в канал")
+            continue
+
+        await mark_poll_posted(
+            pool=pool,
+            channel_id=channel_id,
+            poll_date=poll_date,
+            poll_message_id=poll_msg.message_id,
+            chosen_post_message_id=int(post["message_id"]),
+            question=question,
+            options=options,
+        )
+

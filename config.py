@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     allowed_channel_id: int | None = Field(None, alias="TELEGRAM_ALLOWED_CHANNEL_ID")
     allowed_channel_ids_raw: str | None = Field(None, alias="TELEGRAM_ALLOWED_CHANNEL_IDS")
 
+    # Postgres
+    database_url: str | None = Field(None, alias="DATABASE_URL")
+    database_host: str | None = Field(None, alias="DATABASE_HOST")
+    database_name: str | None = Field(None, alias="DATABASE_NAME")
+    database_user: str | None = Field(None, alias="DATABASE_USER")
+    database_password: str | None = Field(None, alias="DATABASE_PASSWORD")
+    database_port: int = Field(5432, alias="DATABASE_PORT")
+
     # Timeweb AI / OpenAI-совместимый API
     timeweb_ai_base_url: str = Field("https://api.timeweb.cloud", alias="TIMEWEB_AI_BASE_URL")
     timeweb_ai_chat_path: str = Field("/v1/chat/completions", alias="TIMEWEB_AI_CHAT_PATH")
@@ -42,6 +50,21 @@ class Settings(BaseSettings):
     timeweb_ai_max_completion_tokens: int = Field(256, alias="TIMEWEB_AI_MAX_COMPLETION_TOKENS")
     timeweb_ai_use_post_caption: bool = Field(True, alias="TIMEWEB_AI_USE_POST_CAPTION")
     timeweb_ai_emoji_ratio: float = Field(0.3, alias="TIMEWEB_AI_EMOJI_RATIO")
+
+    # Daily poll settings
+    daily_poll_enabled: bool = Field(False, alias="DAILY_POLL_ENABLED")
+    daily_poll_timezone: str = Field("Europe/Moscow", alias="DAILY_POLL_TIMEZONE")
+    daily_poll_start_hour: int = Field(13, alias="DAILY_POLL_START_HOUR")
+    daily_poll_end_hour: int = Field(17, alias="DAILY_POLL_END_HOUR")
+    daily_poll_min_posts: int = Field(3, alias="DAILY_POLL_MIN_POSTS")
+    daily_poll_options_count: int = Field(4, alias="DAILY_POLL_OPTIONS_COUNT")
+    daily_poll_open_seconds: int = Field(3600, alias="DAILY_POLL_OPEN_SECONDS")
+    daily_poll_questions_raw: str = Field(
+        "Что тут происходит?|Что делать дальше?|Какой следующий шаг?|Что здесь самое логичное?|"
+        "К чему всё идёт?|Что будет дальше по сюжету?|Какое решение правильнее?|Что выберешь ты?",
+        alias="DAILY_POLL_QUESTIONS",
+    )
+    daily_poll_channel_ids_raw: str | None = Field(None, alias="DAILY_POLL_CHANNEL_IDS")
 
     # Поведение генерации
     caption_language: str = Field("ru", alias="CAPTION_LANGUAGE")
@@ -65,6 +88,17 @@ class Settings(BaseSettings):
         return f"{base}/webhook/{self.webhook_path_secret}"
 
     @property
+    def database_dsn(self) -> str | None:
+        if self.database_url:
+            return self.database_url
+        if not (self.database_host and self.database_name and self.database_user and self.database_password):
+            return None
+        return (
+            f"postgresql://{self.database_user}:{self.database_password}"
+            f"@{self.database_host}:{self.database_port}/{self.database_name}"
+        )
+
+    @property
     def allowed_channel_ids(self) -> set[int] | None:
         """
         Список разрешённых каналов (опционально).
@@ -86,6 +120,26 @@ class Settings(BaseSettings):
                     continue
 
         return ids if ids else None
+
+    @property
+    def daily_poll_channel_ids(self) -> set[int] | None:
+        if not self.daily_poll_channel_ids_raw:
+            return None
+        ids: set[int] = set()
+        parts = self.daily_poll_channel_ids_raw.replace(";", ",").replace("\n", ",").split(",")
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            try:
+                ids.add(int(p))
+            except ValueError:
+                continue
+        return ids if ids else None
+
+    @property
+    def daily_poll_questions(self) -> list[str]:
+        return [q.strip() for q in self.daily_poll_questions_raw.split("|") if q.strip()]
 
 
 @lru_cache

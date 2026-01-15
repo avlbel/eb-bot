@@ -353,3 +353,102 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
 
     return text[:400]
 
+
+async def generate_poll_options(
+    image_bytes: bytes,
+    question: str,
+    options_count: int,
+) -> list[str]:
+    """
+    Генерирует варианты ответа для опроса.
+    Возвращает список строк (2..4).
+    """
+    settings = get_settings()
+    options_count = max(2, min(4, int(options_count)))
+
+    mime = _guess_mime(image_bytes)
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    data_url = f"data:{mime};base64,{b64}"
+
+    prompt = (
+        f"Сгенерируй {options_count} коротких вариантов ответа для опроса.\n"
+        f"Вопрос: «{question}»\n"
+        "Каждый вариант 2–6 слов, без нумерации, без кавычек, без хэштегов.\n"
+        "Верни только список вариантов, каждый в новой строке."
+    )
+
+    if settings.timeweb_ai_send_image:
+        user_content: Any = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]
+    else:
+        user_content = prompt + "\nЕсли не видишь изображение, всё равно придумай варианты."
+
+    payload: dict[str, Any] = {
+        "model": settings.timeweb_ai_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Ты придумываешь варианты ответов для опросов по картинке. "
+                    "Текст короткий, нейтральный, без токсичности."
+                ),
+            },
+            {
+                "role": "user",
+                "content": user_content,
+            },
+        ],
+        "max_completion_tokens": int(settings.timeweb_ai_max_completion_tokens),
+    }
+    if settings.timeweb_ai_temperature is not None:
+        payload["temperature"] = settings.timeweb_ai_temperature
+
+    base = settings.timeweb_ai_base_url.rstrip("/")
+    path = settings.timeweb_ai_chat_path.strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    url = base + path
+    headers = {
+        "Authorization": f"Bearer {settings.timeweb_ai_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
+        r = await client.post(url, headers=headers, json=payload)
+        if r.status_code >= 400:
+            raise TimewebAIError(f"Timeweb AI HTTP {r.status_code}: {r.text[:500]}")
+        data = r.json()
+
+    text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
+    text = (text or "").strip()
+    if not text:
+        raise TimewebAIError("AI вернул пустые варианты опроса")
+
+    # Нормализуем: строки по переносам, чистим пустые/дубли.
+    lines = [ln.strip(" -•\t") for ln in text.splitlines()]
+    options: list[str] = []
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        if ln not in options:
+            options.append(ln)
+        if len(options) >= options_count:
+            break
+
+    # Если модель вернула всё в одну строку через запятые
+    if len(options) < 2 and "," in text:
+        parts = [p.strip() for p in text.split(",")]
+        for p in parts:
+            if p and p not in options:
+                options.append(p)
+            if len(options) >= options_count:
+                break
+
+    if len(options) < 2:
+        raise TimewebAIError("AI вернул недостаточно вариантов для опроса")
+
+    return options[:options_count]
+

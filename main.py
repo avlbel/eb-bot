@@ -15,6 +15,8 @@ from telegram.ext import Application, ApplicationBuilder, MessageHandler, filter
 
 from bot_logic import handle_channel_photo_post, handle_discussion_auto_forward
 from config import Settings, get_settings_or_error
+from db import close_pool, create_pool
+from poller import poller_loop
 
 
 class _RedactTelegramTokenFilter(logging.Filter):
@@ -79,6 +81,7 @@ def build_telegram_app(settings: Settings) -> Application:
 api = FastAPI()
 telegram_app: Application | None = None
 telegram_task: asyncio.Task | None = None
+poller_task: asyncio.Task | None = None
 
 
 async def init_telegram_in_background(settings: Settings) -> None:
@@ -92,6 +95,10 @@ async def init_telegram_in_background(settings: Settings) -> None:
         await app.initialize()
         await app.start()
         telegram_app = app
+        api.state.telegram_app = app
+        # пробрасываем pool в bot_data, чтобы handlers могли писать в БД
+        if getattr(api.state, "db_pool", None) is not None:
+            app.bot_data["db_pool"] = api.state.db_pool
 
         try:
             await telegram_app.bot.set_webhook(
@@ -136,7 +143,7 @@ async def health() -> dict[str, object]:
 
 @api.on_event("startup")
 async def on_startup() -> None:
-    global telegram_task
+    global telegram_task, poller_task
 
     settings, err = get_settings_or_error()
     api.state.webhook_configured = False
@@ -148,6 +155,17 @@ async def on_startup() -> None:
         logger.error("Config error. Set env vars in App Platform. Details: %s", err)
         return
 
+    # DB pool (для режима опросов/статистики)
+    if settings.database_dsn:
+        try:
+            pool = await create_pool(settings.database_dsn)
+            api.state.db_pool = pool
+        except Exception:
+            logger.exception("DB init failed; daily poll disabled")
+            api.state.db_pool = None
+    else:
+        api.state.db_pool = None
+
     # Логируем fingerprint токена, чтобы было видно, какой токен реально подхватился из env.
     token_fp = hashlib.sha256(settings.telegram_bot_token.encode("utf-8")).hexdigest()[:12]
     logger.info("Bot token fingerprint: %s", token_fp)
@@ -155,17 +173,29 @@ async def on_startup() -> None:
     # Фоновая инициализация Telegram, чтобы не блокировать readiness.
     telegram_task = asyncio.create_task(init_telegram_in_background(settings))
 
+    # Фоновый планировщик опросов
+    poller_task = asyncio.create_task(poller_loop(api.state))
+
 
 @api.on_event("shutdown")
 async def on_shutdown() -> None:
     global telegram_app
     global telegram_task
+    global poller_task
 
     if telegram_task is not None:
         telegram_task.cancel()
         telegram_task = None
 
+    if poller_task is not None:
+        poller_task.cancel()
+        poller_task = None
+
     if telegram_app is None:
+        # Закрываем DB pool, если есть
+        pool = getattr(api.state, "db_pool", None)
+        if pool is not None:
+            await close_pool(pool)
         return
 
     try:
@@ -175,6 +205,10 @@ async def on_shutdown() -> None:
 
     await telegram_app.stop()
     await telegram_app.shutdown()
+
+    pool = getattr(api.state, "db_pool", None)
+    if pool is not None:
+        await close_pool(pool)
 
 
 @api.post("/webhook/{path_secret}")
