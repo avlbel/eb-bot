@@ -24,6 +24,8 @@
 - **`TELEGRAM_ALLOWED_CHANNEL_ID` / `TELEGRAM_ALLOWED_CHANNEL_IDS`**: ограничение на список разрешённых каналов (через запятую)
 - **`TIMEWEB_AI_USE_POST_CAPTION`**: использовать подпись поста как контекст (по умолчанию `true`)
 - **`TIMEWEB_AI_EMOJI_RATIO`**: доля emoji‑реакций (0.0..1.0), по умолчанию `0.3`
+- **`DATABASE_URL`**: строка подключения к Postgres (например, `postgresql://user:pass@host:5432/dbname`)
+- **`DATABASE_HOST` / `DATABASE_NAME` / `DATABASE_USER` / `DATABASE_PASSWORD` / `DATABASE_PORT`**: альтернативные параметры подключения (если не используете `DATABASE_URL`)
 
 ## Как работает привязка “пост → комментарии”
 
