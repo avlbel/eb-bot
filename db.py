@@ -5,7 +5,10 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 import asyncpg
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS posts (
@@ -42,6 +45,7 @@ async def create_pool(dsn: str) -> asyncpg.Pool:
     pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=5)
     async with pool.acquire() as conn:
         await conn.execute(SCHEMA_SQL)
+    logger.info("Postgres connected and schema ensured")
     return pool
 
 
