@@ -204,7 +204,7 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
             "Придумай одну короткую смешную подпись (до 120 символов) к картинке. "
             "Верни только подпись, без кавычек, без хэштегов, без объяснений."
         )
-        if original_caption:
+        if settings.timeweb_ai_use_post_caption and original_caption:
             user_text += f"\nКонтекст/подпись автора поста: {original_caption}"
 
         if include_image:

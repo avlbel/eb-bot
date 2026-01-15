@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     timeweb_ai_temperature: float | None = Field(None, alias="TIMEWEB_AI_TEMPERATURE")
     timeweb_ai_send_image: bool = Field(True, alias="TIMEWEB_AI_SEND_IMAGE")
     timeweb_ai_max_completion_tokens: int = Field(256, alias="TIMEWEB_AI_MAX_COMPLETION_TOKENS")
+    timeweb_ai_use_post_caption: bool = Field(True, alias="TIMEWEB_AI_USE_POST_CAPTION")
 
     # Поведение генерации
     caption_language: str = Field("ru", alias="CAPTION_LANGUAGE")
