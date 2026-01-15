@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     )
     daily_poll_channel_ids_raw: str | None = Field(None, alias="DAILY_POLL_CHANNEL_IDS")
 
+    # Admin Basic Auth (optional)
+    admin_basic_user: str | None = Field(None, alias="ADMIN_BASIC_USER")
+    admin_basic_password: str | None = Field(None, alias="ADMIN_BASIC_PASSWORD")
+
     # Поведение генерации
     caption_language: str = Field("ru", alias="CAPTION_LANGUAGE")
 

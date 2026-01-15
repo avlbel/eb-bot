@@ -26,6 +26,7 @@
 - **`TIMEWEB_AI_EMOJI_RATIO`**: доля emoji‑реакций (0.0..1.0), по умолчанию `0.3`
 - **`DATABASE_URL`**: строка подключения к Postgres (например, `postgresql://user:pass@host:5432/dbname`)
 - **`DATABASE_HOST` / `DATABASE_NAME` / `DATABASE_USER` / `DATABASE_PASSWORD` / `DATABASE_PORT`**: альтернативные параметры подключения (если не используете `DATABASE_URL`)
+- **`ADMIN_BASIC_USER` / `ADMIN_BASIC_PASSWORD`**: логин/пароль для админ‑страницы `/admin` (Basic Auth)
 
 ## Как работает привязка “пост → комментарии”
 

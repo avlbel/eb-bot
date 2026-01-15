@@ -6,9 +6,11 @@ import logging
 import os
 import re
 import uuid
+from html import escape
 
-from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from telegram.error import TelegramError
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, MessageHandler, filters
@@ -82,6 +84,7 @@ api = FastAPI()
 telegram_app: Application | None = None
 telegram_task: asyncio.Task | None = None
 poller_task: asyncio.Task | None = None
+basic_auth = HTTPBasic()
 
 
 async def init_telegram_in_background(settings: Settings) -> None:
@@ -144,6 +147,118 @@ async def health() -> dict[str, object]:
         "webhook_configured": bool(getattr(api.state, "webhook_configured", False)),
         "webhook_error": getattr(api.state, "webhook_error", None),
     }
+
+
+def _check_basic_auth(credentials: HTTPBasicCredentials, settings: Settings) -> None:
+    if not settings.admin_basic_user or not settings.admin_basic_password:
+        raise HTTPException(status_code=404, detail="not found")
+    if (
+        credentials.username != settings.admin_basic_user
+        or credentials.password != settings.admin_basic_password
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
+@api.get("/admin", response_class=HTMLResponse)
+async def admin_page(
+    credentials: HTTPBasicCredentials = Depends(basic_auth),
+    limit: int = 50,
+    offset: int = 0,
+) -> HTMLResponse:
+    settings, err = get_settings_or_error()
+    if err is not None or settings is None:
+        raise HTTPException(status_code=503, detail="service not configured")
+
+    _check_basic_auth(credentials, settings)
+
+    pool = getattr(api.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db not configured")
+
+    limit = max(1, min(200, int(limit)))
+    offset = max(0, int(offset))
+
+    async with pool.acquire() as conn:
+        posts = await conn.fetch(
+            """
+            SELECT channel_id, message_id, post_date, photo_file_id, created_at
+            FROM posts
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
+            """,
+            limit,
+            offset,
+        )
+        polls = await conn.fetch(
+            """
+            SELECT channel_id, poll_date, scheduled_at, posted_at, skipped_at,
+                   poll_message_id, chosen_post_message_id, question
+            FROM daily_poll
+            ORDER BY poll_date DESC, channel_id
+            LIMIT $1 OFFSET $2
+            """,
+            limit,
+            offset,
+        )
+
+    def _table(headers: list[str], rows: list[list[str]]) -> str:
+        th = "".join(f"<th>{escape(h)}</th>" for h in headers)
+        trs = []
+        for r in rows:
+            tds = "".join(f"<td>{escape(x)}</td>" for x in r)
+            trs.append(f"<tr>{tds}</tr>")
+        return f"<table><thead><tr>{th}</tr></thead><tbody>{''.join(trs)}</tbody></table>"
+
+    posts_rows = [
+        [
+            str(r["channel_id"]),
+            str(r["message_id"]),
+            str(r["post_date"]),
+            str(r["photo_file_id"] or ""),
+            str(r["created_at"]),
+        ]
+        for r in posts
+    ]
+    polls_rows = [
+        [
+            str(r["channel_id"]),
+            str(r["poll_date"]),
+            str(r["scheduled_at"]),
+            str(r["posted_at"] or ""),
+            str(r["skipped_at"] or ""),
+            str(r["poll_message_id"] or ""),
+            str(r["chosen_post_message_id"] or ""),
+            str(r["question"] or ""),
+        ]
+        for r in polls
+    ]
+
+    html = f"""
+    <html>
+      <head>
+        <meta charset="utf-8"/>
+        <title>EB Bot Admin</title>
+        <style>
+          body {{ font-family: Arial, sans-serif; margin: 20px; }}
+          table {{ border-collapse: collapse; width: 100%; margin-bottom: 24px; }}
+          th, td {{ border: 1px solid #ddd; padding: 6px 8px; font-size: 12px; }}
+          th {{ background: #f4f4f4; text-align: left; }}
+        </style>
+      </head>
+      <body>
+        <h2>posts</h2>
+        {_table(["channel_id","message_id","post_date","photo_file_id","created_at"], posts_rows)}
+        <h2>daily_poll</h2>
+        {_table(["channel_id","poll_date","scheduled_at","posted_at","skipped_at","poll_message_id","chosen_post_message_id","question"], polls_rows)}
+        <p>limit={limit} offset={offset}</p>
+      </body>
+    </html>
+    """
+    return HTMLResponse(html)
 
 
 @api.on_event("startup")
