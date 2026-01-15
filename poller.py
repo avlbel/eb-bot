@@ -38,14 +38,18 @@ async def run_poll_once(state) -> None:
     settings = get_settings()
     pool = getattr(state, "db_pool", None)
     if pool is None or not settings.daily_poll_enabled:
+        if settings.daily_poll_enabled and pool is None:
+            logger.warning("Daily poll enabled but DB pool is not available")
         return
 
     poll_channels = settings.daily_poll_channel_ids
     if not poll_channels:
+        logger.warning("Daily poll enabled but DAILY_POLL_CHANNEL_IDS is empty")
         return
 
     app = getattr(state, "telegram_app", None)
     if app is None:
+        logger.warning("Daily poll enabled but telegram_app is not ready yet")
         return
 
     now_utc = utc_now()
@@ -71,19 +75,41 @@ async def run_poll_once(state) -> None:
         if now_local > end_dt:
             # Если окно уже прошло — помечаем как пропущенный опрос.
             await mark_poll_skipped(pool, channel_id, poll_date)
+            logger.info(
+                "Daily poll skipped: window passed (channel_id=%s, date=%s)",
+                channel_id,
+                poll_date,
+            )
             continue
 
         # Нужно минимум N постов за день
         posts_count = await count_posts_for_date(pool, channel_id, poll_date)
         if posts_count < settings.daily_poll_min_posts:
+            logger.info(
+                "Daily poll not posted: not enough posts (%s/%s) for channel_id=%s date=%s",
+                posts_count,
+                settings.daily_poll_min_posts,
+                channel_id,
+                poll_date,
+            )
             continue
 
         post = await pick_random_post(pool, channel_id, poll_date)
         if not post:
+            logger.info(
+                "Daily poll not posted: no posts found for channel_id=%s date=%s",
+                channel_id,
+                poll_date,
+            )
             continue
 
         photo_file_id = post.get("photo_file_id")
         if not photo_file_id:
+            logger.info(
+                "Daily poll not posted: chosen post has no photo_file_id (channel_id=%s date=%s)",
+                channel_id,
+                poll_date,
+            )
             continue
 
         # Загружаем картинку
