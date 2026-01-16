@@ -103,7 +103,7 @@ uvicorn main:api --host 0.0.0.0 --port 8080
 - `DAILY_POLL_START_HOUR=13`, `DAILY_POLL_END_HOUR=17`
 - `DAILY_POLL_MIN_POSTS=3`
 - `DAILY_POLL_OPTIONS_COUNT=4`
-- `DAILY_POLL_OPEN_SECONDS=3600`
+- `DAILY_POLL_OPEN_SECONDS=3600` (если 0 или не задан — опрос бессрочный)
 - `DAILY_POLL_QUESTIONS=Что тут происходит?|Что делать дальше?|...`
 
 Для режима опросов нужен Postgres. Параметры подключения — в `env.example`.

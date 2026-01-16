@@ -156,15 +156,17 @@ async def run_poll_once(
             return {"ok": False, "reason": "ai_options_failed", "channel_id": channel_id, "date": str(poll_date)}
 
         try:
-            poll_msg = await app.bot.send_poll(
+            poll_kwargs = dict(
                 chat_id=channel_id,
                 question=question,
                 options=options,
                 is_anonymous=True,
                 allows_multiple_answers=False,
-                open_period=settings.daily_poll_open_seconds,
                 reply_to_message_id=int(post["message_id"]),
             )
+            if settings.daily_poll_open_seconds and settings.daily_poll_open_seconds > 0:
+                poll_kwargs["open_period"] = settings.daily_poll_open_seconds
+            poll_msg = await app.bot.send_poll(**poll_kwargs)
         except TelegramError:
             logger.exception("Не удалось отправить опрос в канал")
             return {"ok": False, "reason": "send_poll_failed", "channel_id": channel_id, "date": str(poll_date)}
