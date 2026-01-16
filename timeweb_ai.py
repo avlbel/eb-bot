@@ -482,9 +482,7 @@ async def generate_poll_options(
                     )
                     suffix = f" (response_id={response_id})" if response_id else ""
                     logger.error("Poll options empty response meta: %s", _response_meta(data))
-                    # Фолбэк: возвращаем безопасные варианты, чтобы не блокировать опрос.
-                    fallback = ["Продолжать", "Развернуться", "Подождать", "Звать помощь"]
-                    return fallback[:options_count]
+                    raise TimewebAIError(f"AI вернул пустые варианты опроса{suffix}")
 
     # Нормализуем: строки по переносам, чистим пустые/дубли.
     lines = [ln.strip(" -•\t") for ln in text.splitlines()]
@@ -517,8 +515,7 @@ async def generate_poll_options(
         )
         suffix = f" (response_id={response_id})" if response_id else ""
         logger.error("Poll options insufficient response meta: %s", _response_meta(data))
-        fallback = ["Продолжать", "Развернуться", "Подождать", "Звать помощь"]
-        return fallback[:options_count]
+        raise TimewebAIError(f"AI вернул недостаточно вариантов для опроса{suffix}")
 
     return options[:options_count]
 
