@@ -58,7 +58,8 @@ class Settings(BaseSettings):
     daily_poll_end_hour: int = Field(17, alias="DAILY_POLL_END_HOUR")
     daily_poll_min_posts: int = Field(3, alias="DAILY_POLL_MIN_POSTS")
     daily_poll_options_count: int = Field(4, alias="DAILY_POLL_OPTIONS_COUNT")
-    daily_poll_open_seconds: int = Field(3600, alias="DAILY_POLL_OPEN_SECONDS")
+    # 0 или None = бессрочный опрос
+    daily_poll_open_seconds: int | None = Field(0, alias="DAILY_POLL_OPEN_SECONDS")
     daily_poll_questions_raw: str = Field(
         "Что тут происходит?|Что делать дальше?|Какой следующий шаг?|Что здесь самое логичное?|"
         "К чему всё идёт?|Что будет дальше по сюжету?|Какое решение правильнее?|Что выберешь ты?",
