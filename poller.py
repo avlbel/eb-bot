@@ -12,6 +12,7 @@ from config import get_settings
 from db import (
     count_posts_for_date,
     ensure_daily_poll,
+    force_schedule_daily_poll,
     get_due_polls,
     mark_poll_posted,
     mark_poll_error,
@@ -67,7 +68,7 @@ async def run_poll_once(
         poll_date = now_local.date()
         channels = [force_channel_id] if force_channel_id is not None else list(poll_channels)
         for channel_id in channels:
-            await ensure_daily_poll(pool, channel_id, poll_date, now_utc)
+            await force_schedule_daily_poll(pool, channel_id, poll_date, now_utc)
         due = await get_due_polls(pool, now_utc)
     if not due:
         return {"ok": False, "reason": "no_due_polls"}

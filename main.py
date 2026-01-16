@@ -8,7 +8,7 @@ import re
 import uuid
 from html import escape
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from telegram.error import TelegramError
@@ -273,7 +273,7 @@ async def admin_page(
 @api.post("/admin/poll/run")
 async def admin_run_poll(
     credentials: HTTPBasicCredentials = Depends(basic_auth),
-    channel_id: str | None = None,
+    channel_id: str | None = Form(default=None),
 ) -> dict[str, object]:
     settings, err = get_settings_or_error()
     if err is not None or settings is None:

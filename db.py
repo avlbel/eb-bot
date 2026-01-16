@@ -112,6 +112,35 @@ async def ensure_daily_poll(pool: asyncpg.Pool, channel_id: int, poll_date: date
         )
 
 
+async def force_schedule_daily_poll(
+    pool: asyncpg.Pool,
+    channel_id: int,
+    poll_date: date,
+    scheduled_at: datetime,
+) -> None:
+    """
+    Принудительно ставит опрос на "сейчас" (даже если запись уже есть).
+    Сбрасывает posted_at/skipped_at/last_error.
+    """
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO daily_poll(channel_id, poll_date, scheduled_at, posted_at, skipped_at, last_error, last_error_at)
+            VALUES ($1, $2, $3, NULL, NULL, NULL, NULL)
+            ON CONFLICT (channel_id, poll_date)
+            DO UPDATE SET
+                scheduled_at = EXCLUDED.scheduled_at,
+                posted_at = NULL,
+                skipped_at = NULL,
+                last_error = NULL,
+                last_error_at = NULL
+            """,
+            channel_id,
+            poll_date,
+            scheduled_at,
+        )
+
+
 async def get_due_polls(pool: asyncpg.Pool, now_utc: datetime) -> list[asyncpg.Record]:
     async with pool.acquire() as conn:
         return await conn.fetch(
