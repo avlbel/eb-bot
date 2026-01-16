@@ -62,6 +62,7 @@ async def run_poll_once(
     due = await get_due_polls(pool, now_utc)
     if not due and force:
         # Принудительный запуск: создаём poll на "сейчас" для всех разрешённых каналов.
+        tz = ZoneInfo(settings.daily_poll_timezone)
         now_local = datetime.now(tz)
         poll_date = now_local.date()
         channels = [force_channel_id] if force_channel_id is not None else list(poll_channels)
