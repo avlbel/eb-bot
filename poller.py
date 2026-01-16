@@ -35,7 +35,7 @@ async def poller_loop(state) -> None:
         await asyncio.sleep(60)
 
 
-async def run_poll_once(state) -> None:
+async def run_poll_once(state, force: bool = False) -> None:
     settings = get_settings()
     pool = getattr(state, "db_pool", None)
     if pool is None or not settings.daily_poll_enabled:
@@ -72,7 +72,7 @@ async def run_poll_once(state) -> None:
         start_dt = datetime.combine(poll_date, start_t, tzinfo=tz)
         end_dt = datetime.combine(poll_date, end_t, tzinfo=tz)
         now_local = datetime.now(tz)
-        if now_local > end_dt:
+        if now_local > end_dt and not force:
             # Если окно уже прошло — помечаем как пропущенный опрос.
             await mark_poll_skipped(pool, channel_id, poll_date)
             logger.info(
@@ -84,7 +84,7 @@ async def run_poll_once(state) -> None:
 
         # Нужно минимум N постов за день
         posts_count = await count_posts_for_date(pool, channel_id, poll_date)
-        if posts_count < settings.daily_poll_min_posts:
+        if posts_count < settings.daily_poll_min_posts and not force:
             logger.info(
                 "Daily poll not posted: not enough posts (%s/%s) for channel_id=%s date=%s",
                 posts_count,

@@ -447,7 +447,15 @@ async def generate_poll_options(
             text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
             text = (text or "").strip()
             if not text:
-                raise TimewebAIError("AI вернул пустые варианты опроса")
+                response_id = (
+                    data.get("response_id")
+                    or data.get("id")
+                    or data.get("request_id")
+                    or data.get("trace_id")
+                    or data.get("x_request_id")
+                )
+                suffix = f" (response_id={response_id})" if response_id else ""
+                raise TimewebAIError(f"AI вернул пустые варианты опроса{suffix}")
 
     # Нормализуем: строки по переносам, чистим пустые/дубли.
     lines = [ln.strip(" -•\t") for ln in text.splitlines()]
@@ -471,7 +479,15 @@ async def generate_poll_options(
                 break
 
     if len(options) < 2:
-        raise TimewebAIError("AI вернул недостаточно вариантов для опроса")
+        response_id = (
+            data.get("response_id")
+            or data.get("id")
+            or data.get("request_id")
+            or data.get("trace_id")
+            or data.get("x_request_id")
+        )
+        suffix = f" (response_id={response_id})" if response_id else ""
+        raise TimewebAIError(f"AI вернул недостаточно вариантов для опроса{suffix}")
 
     return options[:options_count]
 

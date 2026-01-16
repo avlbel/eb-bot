@@ -18,7 +18,7 @@ from telegram.ext import Application, ApplicationBuilder, MessageHandler, filter
 from bot_logic import handle_channel_photo_post, handle_discussion_auto_forward
 from config import Settings, get_settings_or_error
 from db import close_pool, create_pool
-from poller import poller_loop
+from poller import poller_loop, run_poll_once
 
 
 class _RedactTelegramTokenFilter(logging.Filter):
@@ -247,9 +247,15 @@ async def admin_page(
           table {{ border-collapse: collapse; width: 100%; margin-bottom: 24px; }}
           th, td {{ border: 1px solid #ddd; padding: 6px 8px; font-size: 12px; }}
           th {{ background: #f4f4f4; text-align: left; }}
+          .actions {{ margin: 8px 0 24px; }}
         </style>
       </head>
       <body>
+        <div class="actions">
+          <form method="post" action="/admin/poll/run">
+            <button type="submit">Запустить опрос вручную</button>
+          </form>
+        </div>
         <h2>posts</h2>
         {_table(["channel_id","message_id","post_date","photo_file_id","created_at"], posts_rows)}
         <h2>daily_poll</h2>
@@ -259,6 +265,19 @@ async def admin_page(
     </html>
     """
     return HTMLResponse(html)
+
+
+@api.post("/admin/poll/run")
+async def admin_run_poll(
+    credentials: HTTPBasicCredentials = Depends(basic_auth),
+) -> dict[str, bool]:
+    settings, err = get_settings_or_error()
+    if err is not None or settings is None:
+        raise HTTPException(status_code=503, detail="service not configured")
+    _check_basic_auth(credentials, settings)
+
+    await run_poll_once(api.state, force=True)
+    return {"ok": True}
 
 
 @api.on_event("startup")
