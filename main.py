@@ -272,7 +272,7 @@ async def admin_page(
 @api.post("/admin/poll/run")
 async def admin_run_poll(
     credentials: HTTPBasicCredentials = Depends(basic_auth),
-) -> dict[str, bool]:
+) -> dict[str, object]:
     settings, err = get_settings_or_error()
     if err is not None or settings is None:
         raise HTTPException(status_code=503, detail="service not configured")
