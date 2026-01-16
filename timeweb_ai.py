@@ -4,7 +4,6 @@ import base64
 import json
 import logging
 import random
-import re
 from typing import Any
 
 import httpx
@@ -56,16 +55,6 @@ def _extract_text_from_responses_api(data: dict[str, Any]) -> str:
                 parts.append(c["text"])
     return "\n".join(parts)
 
-def _strip_code_fences(text: str) -> str:
-    """
-    Убирает markdown-code fences вида ```text ... ``` и ``` ... ```.
-    """
-    if "```" not in text:
-        return text
-    # убираем блоки ```...```
-    return re.sub(r"```(?:\w+)?\s*([\s\S]*?)```", r"\1", text).strip()
-
-
 def _normalize_options(text: str, options_count: int) -> list[str]:
     """
     Нормализует варианты опроса: убирает пустые, дубли, лишние символы.
@@ -91,39 +80,6 @@ def _normalize_options(text: str, options_count: int) -> list[str]:
                 break
 
     return options[:options_count]
-
-def _derive_call_url(settings) -> str | None:
-    if settings.timeweb_ai_call_url:
-        return settings.timeweb_ai_call_url
-    base = settings.timeweb_ai_base_url.rstrip("/")
-    if base.endswith("/v1"):
-        return base[: -len("/v1")] + "/call"
-    return None
-
-
-async def _agent_call_fallback(message: str) -> str:
-    settings = get_settings()
-    call_url = _derive_call_url(settings)
-    if not call_url:
-        return ""
-    headers = {
-        "Authorization": f"Bearer {settings.timeweb_ai_api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {"message": message, "file_ids": []}
-    async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
-        r = await client.post(call_url, headers=headers, json=payload)
-        if r.status_code >= 400:
-            logger.error("Timeweb AI /call HTTP %s: %s", r.status_code, r.text[:200])
-            return ""
-        data = r.json()
-    # Обычно поле 'message' содержит ответ агента
-    if isinstance(data.get("message"), str):
-        return _strip_code_fences(data["message"])
-    # fallback на наиболее похожее поле
-    if isinstance(data.get("result"), str):
-        return _strip_code_fences(data["result"])
-    return ""
 
 
 def _extract_text_from_chat_completions(data: dict[str, Any]) -> str:
@@ -447,13 +403,13 @@ async def generate_poll_options(
         "Верни только список вариантов, каждый в новой строке."
     )
 
-    if settings.timeweb_ai_send_image:
-        user_content: Any = [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": data_url}},
-        ]
-    else:
-        user_content = prompt + "\nЕсли не видишь изображение, всё равно придумай варианты."
+    if not settings.timeweb_ai_send_image:
+        raise TimewebAIError("Для опросов требуется TIMEWEB_AI_SEND_IMAGE=true")
+
+    user_content: Any = [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]
 
     payload: dict[str, Any] = {
         "model": settings.timeweb_ai_model,
@@ -518,48 +474,16 @@ async def generate_poll_options(
             text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
             text = (text or "").strip()
             if not text:
-                # Попытка 3 — без картинки (на случай, если модель не справляется с vision)
-                payload3 = dict(payload)
-                payload3["messages"] = [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Ты генерируешь варианты ответов для опроса. "
-                            "Ответ НЕ может быть пустым."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Сгенерируй {options_count} коротких вариантов ответа. "
-                            f"Вопрос: «{question}». Каждый вариант 2–6 слов."
-                        ),
-                    },
-                ]
-                r3 = await client.post(url, headers=headers, json=payload3)
-                if r3.status_code >= 400:
-                    raise TimewebAIError(f"Timeweb AI HTTP {r3.status_code}: {r3.text[:500]}")
-                data = r3.json()
-                text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
-                text = (text or "").strip()
-                if not text:
-                    response_id = (
-                        data.get("response_id")
-                        or data.get("id")
-                        or data.get("request_id")
-                        or data.get("trace_id")
-                        or data.get("x_request_id")
-                    )
-                    suffix = f" (response_id={response_id})" if response_id else ""
-                    logger.error("Poll options empty response meta: %s", _response_meta(data))
-                    # Последний шанс: /call fallback (text-only)
-                    fallback_text = await _agent_call_fallback(
-                        f"{prompt}\nВерни только варианты, каждый в новой строке."
-                    )
-                    fallback_text = (fallback_text or "").strip()
-                    if not fallback_text:
-                        raise TimewebAIError(f"AI вернул пустые варианты опроса{suffix}")
-                    text = fallback_text
+                response_id = (
+                    data.get("response_id")
+                    or data.get("id")
+                    or data.get("request_id")
+                    or data.get("trace_id")
+                    or data.get("x_request_id")
+                )
+                suffix = f" (response_id={response_id})" if response_id else ""
+                logger.error("Poll options empty response meta: %s", _response_meta(data))
+                raise TimewebAIError(f"AI вернул пустые варианты опроса{suffix}")
 
     options = _normalize_options(text, options_count)
 
@@ -573,16 +497,7 @@ async def generate_poll_options(
         )
         suffix = f" (response_id={response_id})" if response_id else ""
         logger.error("Poll options insufficient response meta: %s", _response_meta(data))
-        # Последний шанс: /call fallback (text-only)
-        fallback_text = await _agent_call_fallback(
-            f"{prompt}\nВерни только варианты, каждый в новой строке."
-        )
-        fallback_text = (fallback_text or "").strip()
-        if not fallback_text:
-            raise TimewebAIError(f"AI вернул недостаточно вариантов для опроса{suffix}")
-        options = _normalize_options(fallback_text, options_count)
-        if len(options) < 2:
-            raise TimewebAIError(f"AI вернул недостаточно вариантов для опроса{suffix}")
+        raise TimewebAIError(f"AI вернул недостаточно вариантов для опроса{suffix}")
 
     return options[:options_count]
 
