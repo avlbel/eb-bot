@@ -66,6 +66,32 @@ def _strip_code_fences(text: str) -> str:
     return re.sub(r"```(?:\w+)?\s*([\s\S]*?)```", r"\1", text).strip()
 
 
+def _normalize_options(text: str, options_count: int) -> list[str]:
+    """
+    Нормализует варианты опроса: убирает пустые, дубли, лишние символы.
+    """
+    lines = [ln.strip(" -•\t") for ln in text.splitlines()]
+    options: list[str] = []
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        if ln not in options:
+            options.append(ln)
+        if len(options) >= options_count:
+            break
+
+    # Если модель вернула всё в одну строку через запятые
+    if len(options) < 2 and "," in text:
+        parts = [p.strip() for p in text.split(",")]
+        for p in parts:
+            if p and p not in options:
+                options.append(p)
+            if len(options) >= options_count:
+                break
+
+    return options[:options_count]
+
 def _derive_call_url(settings) -> str | None:
     if settings.timeweb_ai_call_url:
         return settings.timeweb_ai_call_url
@@ -535,26 +561,7 @@ async def generate_poll_options(
                         raise TimewebAIError(f"AI вернул пустые варианты опроса{suffix}")
                     text = fallback_text
 
-    # Нормализуем: строки по переносам, чистим пустые/дубли.
-    lines = [ln.strip(" -•\t") for ln in text.splitlines()]
-    options: list[str] = []
-    for ln in lines:
-        ln = ln.strip()
-        if not ln:
-            continue
-        if ln not in options:
-            options.append(ln)
-        if len(options) >= options_count:
-            break
-
-    # Если модель вернула всё в одну строку через запятые
-    if len(options) < 2 and "," in text:
-        parts = [p.strip() for p in text.split(",")]
-        for p in parts:
-            if p and p not in options:
-                options.append(p)
-            if len(options) >= options_count:
-                break
+    options = _normalize_options(text, options_count)
 
     if len(options) < 2:
         response_id = (
@@ -573,21 +580,7 @@ async def generate_poll_options(
         fallback_text = (fallback_text or "").strip()
         if not fallback_text:
             raise TimewebAIError(f"AI вернул недостаточно вариантов для опроса{suffix}")
-        # Пересобираем варианты из fallback
-        lines = [ln.strip(" -•\t") for ln in fallback_text.splitlines()]
-        options = []
-        for ln in lines:
-            if ln and ln not in options:
-                options.append(ln)
-            if len(options) >= options_count:
-                break
-        if len(options) < 2 and "," in fallback_text:
-            parts = [p.strip() for p in fallback_text.split(",")]
-            for p in parts:
-                if p and p not in options:
-                    options.append(p)
-                if len(options) >= options_count:
-                    break
+        options = _normalize_options(fallback_text, options_count)
         if len(options) < 2:
             raise TimewebAIError(f"AI вернул недостаточно вариантов для опроса{suffix}")
 
