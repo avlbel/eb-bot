@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import random
+import re
 from typing import Any
 
 import httpx
@@ -55,6 +56,15 @@ def _extract_text_from_responses_api(data: dict[str, Any]) -> str:
                 parts.append(c["text"])
     return "\n".join(parts)
 
+def _strip_code_fences(text: str) -> str:
+    """
+    Убирает markdown-code fences вида ```text ... ``` и ``` ... ```.
+    """
+    if "```" not in text:
+        return text
+    # убираем блоки ```...```
+    return re.sub(r"```(?:\w+)?\s*([\s\S]*?)```", r"\1", text).strip()
+
 
 def _derive_call_url(settings) -> str | None:
     if settings.timeweb_ai_call_url:
@@ -83,10 +93,10 @@ async def _agent_call_fallback(message: str) -> str:
         data = r.json()
     # Обычно поле 'message' содержит ответ агента
     if isinstance(data.get("message"), str):
-        return data["message"]
+        return _strip_code_fences(data["message"])
     # fallback на наиболее похожее поле
     if isinstance(data.get("result"), str):
-        return data["result"]
+        return _strip_code_fences(data["result"])
     return ""
 
 
