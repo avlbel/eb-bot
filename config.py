@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # Timeweb AI / OpenAI-совместимый API
     timeweb_ai_base_url: str = Field("https://api.timeweb.cloud", alias="TIMEWEB_AI_BASE_URL")
     timeweb_ai_chat_path: str = Field("/v1/chat/completions", alias="TIMEWEB_AI_CHAT_PATH")
+    timeweb_ai_call_url: str | None = Field(None, alias="TIMEWEB_AI_CALL_URL")
     timeweb_ai_api_key: str = Field(..., alias="TIMEWEB_AI_API_KEY")
     timeweb_ai_model: str = Field(..., alias="TIMEWEB_AI_MODEL")
     timeweb_ai_timeout_s: float = Field(30.0, alias="TIMEWEB_AI_TIMEOUT_S")

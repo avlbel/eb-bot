@@ -21,6 +21,7 @@
 - **`TELEGRAM_WEBHOOK_SECRET_TOKEN`**: секрет для заголовка Telegram `X-Telegram-Bot-Api-Secret-Token`
 - **`TIMEWEB_AI_API_KEY`**, **`TIMEWEB_AI_MODEL`**, **`TIMEWEB_AI_BASE_URL`**
 - **`TIMEWEB_AI_CHAT_PATH`**: путь к endpoint chat‑completions (по умолчанию `/v1/chat/completions`)
+- **`TIMEWEB_AI_CALL_URL`**: (опционально) прямой URL метода `/call` для fallback при генерации опросов
 - **`TELEGRAM_ALLOWED_CHANNEL_ID` / `TELEGRAM_ALLOWED_CHANNEL_IDS`**: ограничение на список разрешённых каналов (через запятую)
 - **`TIMEWEB_AI_USE_POST_CAPTION`**: использовать подпись поста как контекст (по умолчанию `true`)
 - **`TIMEWEB_AI_EMOJI_RATIO`**: доля emoji‑реакций (0.0..1.0), по умолчанию `0.3`
