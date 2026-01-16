@@ -401,6 +401,7 @@ async def generate_poll_options(
             },
         ],
         "max_completion_tokens": int(settings.timeweb_ai_max_completion_tokens),
+        "response_format": {"type": "text"},
     }
     if settings.timeweb_ai_temperature is not None:
         payload["temperature"] = settings.timeweb_ai_temperature
@@ -447,15 +448,43 @@ async def generate_poll_options(
             text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
             text = (text or "").strip()
             if not text:
-                response_id = (
-                    data.get("response_id")
-                    or data.get("id")
-                    or data.get("request_id")
-                    or data.get("trace_id")
-                    or data.get("x_request_id")
-                )
-                suffix = f" (response_id={response_id})" if response_id else ""
-                raise TimewebAIError(f"AI вернул пустые варианты опроса{suffix}")
+                # Попытка 3 — без картинки (на случай, если модель не справляется с vision)
+                payload3 = dict(payload)
+                payload3["messages"] = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Ты генерируешь варианты ответов для опроса. "
+                            "Ответ НЕ может быть пустым."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Сгенерируй {options_count} коротких вариантов ответа. "
+                            f"Вопрос: «{question}». Каждый вариант 2–6 слов."
+                        ),
+                    },
+                ]
+                r3 = await client.post(url, headers=headers, json=payload3)
+                if r3.status_code >= 400:
+                    raise TimewebAIError(f"Timeweb AI HTTP {r3.status_code}: {r3.text[:500]}")
+                data = r3.json()
+                text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
+                text = (text or "").strip()
+                if not text:
+                    response_id = (
+                        data.get("response_id")
+                        or data.get("id")
+                        or data.get("request_id")
+                        or data.get("trace_id")
+                        or data.get("x_request_id")
+                    )
+                    suffix = f" (response_id={response_id})" if response_id else ""
+                    logger.error("Poll options empty response meta: %s", _response_meta(data))
+                    # Фолбэк: возвращаем безопасные варианты, чтобы не блокировать опрос.
+                    fallback = ["Продолжать", "Развернуться", "Подождать", "Звать помощь"]
+                    return fallback[:options_count]
 
     # Нормализуем: строки по переносам, чистим пустые/дубли.
     lines = [ln.strip(" -•\t") for ln in text.splitlines()]
@@ -487,7 +516,9 @@ async def generate_poll_options(
             or data.get("x_request_id")
         )
         suffix = f" (response_id={response_id})" if response_id else ""
-        raise TimewebAIError(f"AI вернул недостаточно вариантов для опроса{suffix}")
+        logger.error("Poll options insufficient response meta: %s", _response_meta(data))
+        fallback = ["Продолжать", "Развернуться", "Подождать", "Звать помощь"]
+        return fallback[:options_count]
 
     return options[:options_count]
 
