@@ -11,6 +11,7 @@ from telegram.error import TelegramError
 from config import get_settings
 from db import (
     count_posts_for_date,
+    ensure_daily_poll,
     get_due_polls,
     mark_poll_posted,
     mark_poll_error,
@@ -55,6 +56,13 @@ async def run_poll_once(state, force: bool = False) -> dict[str, object]:
 
     now_utc = utc_now()
     due = await get_due_polls(pool, now_utc)
+    if not due and force:
+        # Принудительный запуск: создаём poll на "сейчас" для всех разрешённых каналов.
+        now_local = datetime.now(tz)
+        poll_date = now_local.date()
+        for channel_id in poll_channels:
+            await ensure_daily_poll(pool, channel_id, poll_date, now_utc)
+        due = await get_due_polls(pool, now_utc)
     if not due:
         return {"ok": False, "reason": "no_due_polls"}
 
@@ -102,6 +110,8 @@ async def run_poll_once(state, force: bool = False) -> dict[str, object]:
                 channel_id,
                 poll_date,
             )
+            if force:
+                return {"ok": False, "reason": "no_posts_today", "channel_id": channel_id, "date": str(poll_date)}
             continue
 
         photo_file_id = post.get("photo_file_id")
