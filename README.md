@@ -155,3 +155,8 @@ uvicorn main:api --host 0.0.0.0 --port 8080
 ```
 /admin?limit=50&offset=100
 ```
+
+Ручной запуск опроса:
+
+- на странице `/admin` есть форма для запуска
+- можно указать `channel_id` (из whitelist `DAILY_POLL_CHANNEL_IDS`)

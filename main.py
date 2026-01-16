@@ -255,6 +255,7 @@ async def admin_page(
       <body>
         <div class="actions">
           <form method="post" action="/admin/poll/run">
+            <label>Channel ID: <input name="channel_id" placeholder="-100123..." /></label>
             <button type="submit">Запустить опрос вручную</button>
           </form>
         </div>
@@ -272,13 +273,21 @@ async def admin_page(
 @api.post("/admin/poll/run")
 async def admin_run_poll(
     credentials: HTTPBasicCredentials = Depends(basic_auth),
+    channel_id: str | None = None,
 ) -> dict[str, object]:
     settings, err = get_settings_or_error()
     if err is not None or settings is None:
         raise HTTPException(status_code=503, detail="service not configured")
     _check_basic_auth(credentials, settings)
 
-    result = await run_poll_once(api.state, force=True)
+    force_channel_id = None
+    if channel_id:
+        try:
+            force_channel_id = int(channel_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid channel_id")
+
+    result = await run_poll_once(api.state, force=True, force_channel_id=force_channel_id)
     return {"ok": True, "result": result}
 
 

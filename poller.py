@@ -37,7 +37,11 @@ async def poller_loop(state) -> None:
         await asyncio.sleep(60)
 
 
-async def run_poll_once(state, force: bool = False) -> dict[str, object]:
+async def run_poll_once(
+    state,
+    force: bool = False,
+    force_channel_id: int | None = None,
+) -> dict[str, object]:
     settings = get_settings()
     pool = getattr(state, "db_pool", None)
     if pool is None or not settings.daily_poll_enabled:
@@ -60,7 +64,8 @@ async def run_poll_once(state, force: bool = False) -> dict[str, object]:
         # Принудительный запуск: создаём poll на "сейчас" для всех разрешённых каналов.
         now_local = datetime.now(tz)
         poll_date = now_local.date()
-        for channel_id in poll_channels:
+        channels = [force_channel_id] if force_channel_id is not None else list(poll_channels)
+        for channel_id in channels:
             await ensure_daily_poll(pool, channel_id, poll_date, now_utc)
         due = await get_due_polls(pool, now_utc)
     if not due:
@@ -75,6 +80,8 @@ async def run_poll_once(state, force: bool = False) -> dict[str, object]:
         poll_date = row["poll_date"]
 
         if channel_id not in poll_channels:
+            continue
+        if force_channel_id is not None and channel_id != force_channel_id:
             continue
 
         # окно публикации
