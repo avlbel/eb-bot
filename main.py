@@ -278,8 +278,8 @@ async def admin_run_poll(
         raise HTTPException(status_code=503, detail="service not configured")
     _check_basic_auth(credentials, settings)
 
-    await run_poll_once(api.state, force=True)
-    return {"ok": True}
+    result = await run_poll_once(api.state, force=True)
+    return {"ok": True, "result": result}
 
 
 @api.on_event("startup")

@@ -36,27 +36,27 @@ async def poller_loop(state) -> None:
         await asyncio.sleep(60)
 
 
-async def run_poll_once(state, force: bool = False) -> None:
+async def run_poll_once(state, force: bool = False) -> dict[str, object]:
     settings = get_settings()
     pool = getattr(state, "db_pool", None)
     if pool is None or not settings.daily_poll_enabled:
         if settings.daily_poll_enabled and pool is None:
             logger.warning("Daily poll enabled but DB pool is not available")
-        return
+        return {"ok": False, "reason": "db_not_available_or_poll_disabled"}
 
     poll_channels = settings.daily_poll_channel_ids
     if not poll_channels:
         logger.warning("Daily poll enabled but DAILY_POLL_CHANNEL_IDS is empty")
-        return
+        return {"ok": False, "reason": "poll_channels_empty"}
 
     app = getattr(state, "telegram_app", None)
     if app is None:
-        return
+        return {"ok": False, "reason": "telegram_app_not_ready"}
 
     now_utc = utc_now()
     due = await get_due_polls(pool, now_utc)
     if not due:
-        return
+        return {"ok": False, "reason": "no_due_polls"}
 
     tz = ZoneInfo(settings.daily_poll_timezone)
     start_t = dtime(hour=settings.daily_poll_start_hour, minute=0)
@@ -119,7 +119,7 @@ async def run_poll_once(state, force: bool = False) -> None:
             image_bytes = bytes(await tg_file.download_as_bytearray())
         except TelegramError:
             logger.exception("Не удалось скачать картинку для опроса")
-            continue
+            return {"ok": False, "reason": "download_photo_failed", "channel_id": channel_id, "date": str(poll_date)}
 
         # Вопрос — фиксированный список
         question = random.choice(settings.daily_poll_questions)
@@ -134,7 +134,7 @@ async def run_poll_once(state, force: bool = False) -> None:
             logger.exception("Не удалось сгенерировать варианты опроса через AI (2 попытки)")
             await mark_poll_error(pool, channel_id, poll_date, str(e))
             await mark_poll_skipped(pool, channel_id, poll_date)
-            continue
+            return {"ok": False, "reason": "ai_options_failed", "channel_id": channel_id, "date": str(poll_date)}
 
         try:
             poll_msg = await app.bot.send_poll(
@@ -148,7 +148,7 @@ async def run_poll_once(state, force: bool = False) -> None:
             )
         except TelegramError:
             logger.exception("Не удалось отправить опрос в канал")
-            continue
+            return {"ok": False, "reason": "send_poll_failed", "channel_id": channel_id, "date": str(poll_date)}
 
         await mark_poll_posted(
             pool=pool,
@@ -159,4 +159,7 @@ async def run_poll_once(state, force: bool = False) -> None:
             question=question,
             options=options,
         )
+        return {"ok": True, "channel_id": channel_id, "date": str(poll_date), "poll_message_id": poll_msg.message_id}
+
+    return {"ok": False, "reason": "no_poll_posted"}
 
