@@ -200,6 +200,14 @@ def _response_meta(data: dict[str, Any]) -> dict[str, Any]:
     return meta
 
 
+def _normalize_question(text: str) -> str:
+    text = (text or "").strip().strip("“”\"'`")
+    text = text.replace("\n", " ").strip()
+    if text and not text.endswith("?"):
+        text = text.rstrip(".") + "?"
+    return text
+
+
 async def generate_funny_caption(image_bytes: bytes, original_caption: str | None) -> str:
     """
     Пытаемся получить 1 короткую смешную подпись к картинке через AI-агента Timeweb.
@@ -378,6 +386,120 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
             raise TimewebAIError(f"AI вернул пустую подпись{suffix}")
 
     return text[:400]
+
+
+async def generate_poll_question(image_bytes: bytes) -> str:
+    """
+    Генерирует короткий универсальный вопрос по картинке.
+    Возвращает одну строку.
+    """
+    settings = get_settings()
+    if not settings.timeweb_ai_send_image:
+        raise TimewebAIError("Для опросов требуется TIMEWEB_AI_SEND_IMAGE=true")
+
+    mime = _guess_mime(image_bytes)
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    data_url = f"data:{mime};base64,{b64}"
+
+    user_content: Any = [
+        {
+            "type": "text",
+            "text": (
+                "Придумай короткий универсальный вопрос для опроса по картинке. "
+                "Один вопрос, 3–8 слов, без кавычек и нумерации. "
+                "Верни только вопрос одной строкой."
+            ),
+        },
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]
+
+    payload: dict[str, Any] = {
+        "model": settings.timeweb_ai_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Ты придумываешь короткие вопросы для опросов по картинке.",
+            },
+            {
+                "role": "user",
+                "content": user_content,
+            },
+        ],
+        "max_completion_tokens": int(settings.timeweb_ai_max_completion_tokens),
+        "response_format": {"type": "text"},
+    }
+    if settings.timeweb_ai_temperature is not None:
+        payload["temperature"] = settings.timeweb_ai_temperature
+
+    base = settings.timeweb_ai_base_url.rstrip("/")
+    path = settings.timeweb_ai_chat_path.strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    url = base + path
+    headers = {
+        "Authorization": f"Bearer {settings.timeweb_ai_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
+        r = await client.post(url, headers=headers, json=payload)
+        if r.status_code >= 400:
+            raise TimewebAIError(f"Timeweb AI HTTP {r.status_code}: {r.text[:500]}")
+        data = r.json()
+
+        text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
+        text = _normalize_question(text)
+
+        if not text:
+            finish_reason = _finish_reason_from_chat_completions(data)
+            if finish_reason == "length":
+                payload_more = dict(payload)
+                payload_more["max_completion_tokens"] = max(
+                    int(payload.get("max_completion_tokens", 0) or 0), 2048
+                )
+                r_more = await client.post(url, headers=headers, json=payload_more)
+                if r_more.status_code >= 400:
+                    raise TimewebAIError(f"Timeweb AI HTTP {r_more.status_code}: {r_more.text[:500]}")
+                data = r_more.json()
+                text = _normalize_question(
+                    _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
+                )
+
+        if not text:
+            payload2 = dict(payload)
+            payload2["messages"] = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Ты генерируешь вопрос для опроса по картинке. "
+                        "Ответ НЕ может быть пустым. Только один вопрос."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": payload["messages"][1]["content"],
+                },
+            ]
+            r2 = await client.post(url, headers=headers, json=payload2)
+            if r2.status_code >= 400:
+                raise TimewebAIError(f"Timeweb AI HTTP {r2.status_code}: {r2.text[:500]}")
+            data = r2.json()
+            text = _normalize_question(
+                _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
+            )
+            if not text:
+                response_id = (
+                    data.get("response_id")
+                    or data.get("id")
+                    or data.get("request_id")
+                    or data.get("trace_id")
+                    or data.get("x_request_id")
+                )
+                suffix = f" (response_id={response_id})" if response_id else ""
+                logger.error("Poll question empty response meta: %s", _response_meta(data))
+                raise TimewebAIError(f"AI вернул пустой вопрос опроса{suffix}")
+
+    return text[:200]
 
 
 async def generate_poll_options(

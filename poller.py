@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
@@ -20,7 +19,7 @@ from db import (
     pick_random_post,
     utc_now,
 )
-from timeweb_ai import TimewebAIError, generate_poll_options
+from timeweb_ai import TimewebAIError, generate_poll_options, generate_poll_question
 
 logger = logging.getLogger(__name__)
 
@@ -140,8 +139,13 @@ async def run_poll_once(
             logger.exception("Не удалось скачать картинку для опроса")
             return {"ok": False, "reason": "download_photo_failed", "channel_id": channel_id, "date": str(poll_date)}
 
-        # Вопрос — фиксированный список
-        question = random.choice(settings.daily_poll_questions)
+        try:
+            question = await generate_poll_question(image_bytes=image_bytes)
+        except TimewebAIError as e:
+            logger.exception("Не удалось сгенерировать вопрос опроса через AI")
+            await mark_poll_error(pool, channel_id, poll_date, str(e))
+            await mark_poll_skipped(pool, channel_id, poll_date)
+            return {"ok": False, "reason": "ai_question_failed", "channel_id": channel_id, "date": str(poll_date)}
 
         try:
             options = await generate_poll_options(
