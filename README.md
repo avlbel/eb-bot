@@ -131,6 +131,8 @@ uvicorn main:api --host 0.0.0.0 --port 8080
 - `chosen_post_message_id` BIGINT NULL
 - `question` TEXT
 - `options` JSONB
+- `last_error` TEXT NULL
+- `last_error_at` TIMESTAMPTZ NULL
 - PRIMARY KEY `(channel_id, poll_date)`
 
 ## Очистка таблиц
