@@ -141,6 +141,7 @@ async def run_poll_once(state) -> None:
                 is_anonymous=False,
                 allows_multiple_answers=False,
                 open_period=settings.daily_poll_open_seconds,
+                reply_to_message_id=int(post["message_id"]),
             )
         except TelegramError:
             logger.exception("Не удалось отправить опрос в канал")
