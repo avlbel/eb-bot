@@ -36,8 +36,14 @@ CREATE TABLE IF NOT EXISTS daily_poll (
     chosen_post_message_id BIGINT,
     question TEXT,
     options JSONB,
+    last_error TEXT,
+    last_error_at TIMESTAMPTZ,
     PRIMARY KEY (channel_id, poll_date)
 );
+ALTER TABLE daily_poll
+    ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE daily_poll
+    ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
 """
 
 
@@ -182,6 +188,26 @@ async def mark_poll_skipped(pool: asyncpg.Pool, channel_id: int, poll_date: date
             """,
             channel_id,
             poll_date,
+        )
+
+
+async def mark_poll_error(
+    pool: asyncpg.Pool,
+    channel_id: int,
+    poll_date: date,
+    error_text: str,
+) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE daily_poll
+            SET last_error = $3,
+                last_error_at = NOW()
+            WHERE channel_id = $1 AND poll_date = $2
+            """,
+            channel_id,
+            poll_date,
+            error_text,
         )
 
 

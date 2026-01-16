@@ -13,6 +13,7 @@ from db import (
     count_posts_for_date,
     get_due_polls,
     mark_poll_posted,
+    mark_poll_error,
     mark_poll_skipped,
     pick_random_post,
     utc_now,
@@ -129,8 +130,9 @@ async def run_poll_once(state, force: bool = False) -> None:
                 question=question,
                 options_count=settings.daily_poll_options_count,
             )
-        except TimewebAIError:
+        except TimewebAIError as e:
             logger.exception("Не удалось сгенерировать варианты опроса через AI (2 попытки)")
+            await mark_poll_error(pool, channel_id, poll_date, str(e))
             await mark_poll_skipped(pool, channel_id, poll_date)
             continue
 

@@ -196,7 +196,7 @@ async def admin_page(
         polls = await conn.fetch(
             """
             SELECT channel_id, poll_date, scheduled_at, posted_at, skipped_at,
-                   poll_message_id, chosen_post_message_id, question
+                   poll_message_id, chosen_post_message_id, question, last_error, last_error_at
             FROM daily_poll
             ORDER BY poll_date DESC, channel_id
             LIMIT $1 OFFSET $2
@@ -233,6 +233,8 @@ async def admin_page(
             str(r["poll_message_id"] or ""),
             str(r["chosen_post_message_id"] or ""),
             str(r["question"] or ""),
+            str(r["last_error"] or ""),
+            str(r["last_error_at"] or ""),
         ]
         for r in polls
     ]
@@ -259,7 +261,7 @@ async def admin_page(
         <h2>posts</h2>
         {_table(["channel_id","message_id","post_date","photo_file_id","created_at"], posts_rows)}
         <h2>daily_poll</h2>
-        {_table(["channel_id","poll_date","scheduled_at","posted_at","skipped_at","poll_message_id","chosen_post_message_id","question"], polls_rows)}
+        {_table(["channel_id","poll_date","scheduled_at","posted_at","skipped_at","poll_message_id","chosen_post_message_id","question","last_error","last_error_at"], polls_rows)}
         <p>limit={limit} offset={offset}</p>
       </body>
     </html>
