@@ -416,15 +416,38 @@ async def generate_poll_options(
     }
 
     async with httpx.AsyncClient(timeout=settings.timeweb_ai_timeout_s) as client:
+        # Попытка 1
         r = await client.post(url, headers=headers, json=payload)
         if r.status_code >= 400:
             raise TimewebAIError(f"Timeweb AI HTTP {r.status_code}: {r.text[:500]}")
         data = r.json()
 
-    text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
-    text = (text or "").strip()
-    if not text:
-        raise TimewebAIError("AI вернул пустые варианты опроса")
+        # Попытка 2 (если пусто) — усиленный промпт
+        text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
+        text = (text or "").strip()
+        if not text:
+            payload2 = dict(payload)
+            payload2["messages"] = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Ты генерируешь варианты ответов для опроса. "
+                        "Ответ НЕ может быть пустым. Только варианты, каждый в новой строке."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": payload["messages"][1]["content"],
+                },
+            ]
+            r2 = await client.post(url, headers=headers, json=payload2)
+            if r2.status_code >= 400:
+                raise TimewebAIError(f"Timeweb AI HTTP {r2.status_code}: {r2.text[:500]}")
+            data = r2.json()
+            text = _extract_text_from_chat_completions(data) or _extract_text_from_responses_api(data)
+            text = (text or "").strip()
+            if not text:
+                raise TimewebAIError("AI вернул пустые варианты опроса")
 
     # Нормализуем: строки по переносам, чистим пустые/дубли.
     lines = [ln.strip(" -•\t") for ln in text.splitlines()]

@@ -130,7 +130,8 @@ async def run_poll_once(state) -> None:
                 options_count=settings.daily_poll_options_count,
             )
         except TimewebAIError:
-            logger.exception("Не удалось сгенерировать варианты опроса через AI")
+            logger.exception("Не удалось сгенерировать варианты опроса через AI (2 попытки)")
+            await mark_poll_skipped(pool, channel_id, poll_date)
             continue
 
         try:
