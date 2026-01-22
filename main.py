@@ -19,6 +19,8 @@ from bot_logic import handle_channel_photo_post, handle_discussion_auto_forward
 from config import Settings, get_settings_or_error
 from db import close_pool, create_pool
 from poller import poller_loop, run_poll_once
+from db import get_post
+from timeweb_ai import TimewebAIError, generate_funny_caption
 
 
 class _RedactTelegramTokenFilter(logging.Filter):
@@ -258,6 +260,11 @@ async def admin_page(
             <label>Channel ID: <input name="channel_id" placeholder="-100123..." /></label>
             <button type="submit">Запустить опрос вручную</button>
           </form>
+          <form method="post" action="/admin/post/regenerate">
+            <label>Channel ID: <input name="channel_id" placeholder="-100123..." /></label>
+            <label>Message ID: <input name="message_id" placeholder="12345" /></label>
+            <button type="submit">Пересоздать подпись к посту</button>
+          </form>
         </div>
         <h2>posts</h2>
         {_table(["channel_id","message_id","post_date","photo_file_id","created_at"], posts_rows)}
@@ -289,6 +296,65 @@ async def admin_run_poll(
 
     result = await run_poll_once(api.state, force=True, force_channel_id=force_channel_id)
     return {"ok": True, "result": result}
+
+
+@api.post("/admin/post/regenerate")
+async def admin_regenerate_post_caption(
+    credentials: HTTPBasicCredentials = Depends(basic_auth),
+    channel_id: str | None = Form(default=None),
+    message_id: str | None = Form(default=None),
+) -> dict[str, object]:
+    settings, err = get_settings_or_error()
+    if err is not None or settings is None:
+        raise HTTPException(status_code=503, detail="service not configured")
+    _check_basic_auth(credentials, settings)
+
+    if not channel_id or not message_id:
+        raise HTTPException(status_code=400, detail="channel_id and message_id are required")
+
+    try:
+        channel_id_int = int(channel_id)
+        message_id_int = int(message_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid channel_id or message_id")
+
+    pool = getattr(api.state, "db_pool", None)
+    if pool is None:
+        raise HTTPException(status_code=503, detail="db not configured")
+
+    post = await get_post(pool, channel_id_int, message_id_int)
+    if not post:
+        return {"ok": False, "reason": "post_not_found"}
+
+    photo_file_id = post.get("photo_file_id")
+    discussion_chat_id = post.get("discussion_chat_id")
+    discussion_message_id = post.get("discussion_message_id")
+    if not photo_file_id:
+        return {"ok": False, "reason": "no_photo_file_id"}
+    if not discussion_chat_id or not discussion_message_id:
+        return {"ok": False, "reason": "no_discussion_mapping"}
+
+    app = getattr(api.state, "telegram_app", None)
+    if app is None:
+        return {"ok": False, "reason": "telegram_app_not_ready"}
+
+    try:
+        tg_file = await app.bot.get_file(photo_file_id)
+        image_bytes = bytes(await tg_file.download_as_bytearray())
+        caption = await generate_funny_caption(image_bytes=image_bytes, original_caption=None)
+        await app.bot.send_message(
+            chat_id=int(discussion_chat_id),
+            text=caption,
+            reply_to_message_id=int(discussion_message_id),
+            allow_sending_without_reply=True,
+        )
+    except TimewebAIError as e:
+        return {"ok": False, "reason": "ai_failed", "error": str(e)}
+    except TelegramError:
+        logger.exception("Admin regenerate failed to send comment")
+        return {"ok": False, "reason": "send_failed"}
+
+    return {"ok": True}
 
 
 @api.on_event("startup")

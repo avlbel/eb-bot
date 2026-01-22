@@ -14,6 +14,7 @@ from timeweb_ai import TimewebAIError, generate_funny_caption, generate_poll_opt
 
 from db import (
     ensure_daily_poll,
+    update_discussion_mapping,
     maybe_cleanup_old_posts,
     record_post,
 )
@@ -180,6 +181,19 @@ async def handle_discussion_auto_forward(update: Update, context: ContextTypes.D
         discussion_chat_id=msg.chat.id,
         discussion_message_id=msg.message_id,
     )
+
+    pool = getattr(getattr(context, "application", None), "bot_data", {}).get("db_pool")
+    if pool is not None:
+        try:
+            await update_discussion_mapping(
+                pool=pool,
+                channel_id=channel_chat_id,
+                message_id=channel_message_id,
+                discussion_chat_id=msg.chat.id,
+                discussion_message_id=msg.message_id,
+            )
+        except Exception:
+            logger.exception("Не удалось сохранить mapping поста и discussion message в БД")
 
 
 async def handle_channel_photo_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

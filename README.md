@@ -116,6 +116,8 @@ uvicorn main:api --host 0.0.0.0 --port 8080
 - `message_id` BIGINT
 - `post_date` DATE (в TZ `Europe/Moscow`)
 - `photo_file_id` TEXT
+- `discussion_chat_id` BIGINT NULL
+- `discussion_message_id` BIGINT NULL
 - `created_at` TIMESTAMPTZ
 - UNIQUE `(channel_id, message_id)`
 
@@ -159,3 +161,8 @@ uvicorn main:api --host 0.0.0.0 --port 8080
 
 - на странице `/admin` есть форма для запуска
 - можно указать `channel_id` (из whitelist `DAILY_POLL_CHANNEL_IDS`)
+
+Перегенерация подписи:
+
+- в `/admin` есть форма с `channel_id` и `message_id`
+- бот пересоздаёт подпись и отправляет её ответом в комментарии

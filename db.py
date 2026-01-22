@@ -17,12 +17,18 @@ CREATE TABLE IF NOT EXISTS posts (
     message_id BIGINT NOT NULL,
     post_date DATE NOT NULL,
     photo_file_id TEXT,
+    discussion_chat_id BIGINT,
+    discussion_message_id BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (channel_id, message_id)
 );
 
 ALTER TABLE posts
     ADD COLUMN IF NOT EXISTS photo_file_id TEXT;
+ALTER TABLE posts
+    ADD COLUMN IF NOT EXISTS discussion_chat_id BIGINT;
+ALTER TABLE posts
+    ADD COLUMN IF NOT EXISTS discussion_message_id BIGINT;
 
 CREATE INDEX IF NOT EXISTS idx_posts_channel_date ON posts(channel_id, post_date);
 
@@ -97,6 +103,44 @@ async def record_post(
             photo_file_id,
         )
 
+
+async def update_discussion_mapping(
+    pool: asyncpg.Pool,
+    channel_id: int,
+    message_id: int,
+    discussion_chat_id: int,
+    discussion_message_id: int,
+) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE posts
+            SET discussion_chat_id = $3,
+                discussion_message_id = $4
+            WHERE channel_id = $1 AND message_id = $2
+            """,
+            channel_id,
+            message_id,
+            discussion_chat_id,
+            discussion_message_id,
+        )
+
+
+async def get_post(
+    pool: asyncpg.Pool,
+    channel_id: int,
+    message_id: int,
+) -> asyncpg.Record | None:
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(
+            """
+            SELECT channel_id, message_id, photo_file_id, discussion_chat_id, discussion_message_id
+            FROM posts
+            WHERE channel_id = $1 AND message_id = $2
+            """,
+            channel_id,
+            message_id,
+        )
 
 async def ensure_daily_poll(pool: asyncpg.Pool, channel_id: int, poll_date: date, scheduled_at: datetime) -> None:
     async with pool.acquire() as conn:
