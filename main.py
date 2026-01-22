@@ -187,7 +187,8 @@ async def admin_page(
     async with pool.acquire() as conn:
         posts = await conn.fetch(
             """
-            SELECT channel_id, message_id, post_date, photo_file_id, created_at
+            SELECT channel_id, message_id, post_date, photo_file_id,
+                   discussion_chat_id, discussion_message_id, created_at
             FROM posts
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
@@ -221,6 +222,8 @@ async def admin_page(
             str(r["message_id"]),
             str(r["post_date"]),
             str(r["photo_file_id"] or ""),
+            str(r["discussion_chat_id"] or ""),
+            str(r["discussion_message_id"] or ""),
             str(r["created_at"]),
         ]
         for r in posts
@@ -267,7 +270,7 @@ async def admin_page(
           </form>
         </div>
         <h2>posts</h2>
-        {_table(["channel_id","message_id","post_date","photo_file_id","created_at"], posts_rows)}
+        {_table(["channel_id","message_id","post_date","photo_file_id","discussion_chat_id","discussion_message_id","created_at"], posts_rows)}
         <h2>daily_poll</h2>
         {_table(["channel_id","poll_date","scheduled_at","posted_at","skipped_at","poll_message_id","chosen_post_message_id","question","last_error","last_error_at"], polls_rows)}
         <p>limit={limit} offset={offset}</p>
