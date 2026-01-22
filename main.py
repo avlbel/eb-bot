@@ -266,6 +266,7 @@ async def admin_page(
           <form method="post" action="/admin/post/regenerate">
             <label>Channel ID: <input name="channel_id" placeholder="-100123..." /></label>
             <label>Message ID: <input name="message_id" placeholder="12345" /></label>
+            <small>Нужен message_id поста в канале, не комментария.</small>
             <button type="submit">Пересоздать подпись к посту</button>
           </form>
         </div>
@@ -335,7 +336,18 @@ async def admin_regenerate_post_caption(
     if not photo_file_id:
         return {"ok": False, "reason": "no_photo_file_id"}
     if not discussion_chat_id or not discussion_message_id:
-        return {"ok": False, "reason": "no_discussion_mapping"}
+        # Подождём появления mapping (автофорвард мог прийти чуть позже)
+        for _ in range(10):
+            await asyncio.sleep(0.8)
+            post = await get_post(pool, channel_id_int, message_id_int)
+            if not post:
+                break
+            discussion_chat_id = post.get("discussion_chat_id")
+            discussion_message_id = post.get("discussion_message_id")
+            if discussion_chat_id and discussion_message_id:
+                break
+        if not discussion_chat_id or not discussion_message_id:
+            return {"ok": False, "reason": "no_discussion_mapping"}
 
     app = getattr(api.state, "telegram_app", None)
     if app is None:
