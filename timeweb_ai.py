@@ -217,15 +217,6 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
     b64 = base64.b64encode(image_bytes).decode("ascii")
     data_url = f"data:{mime};base64,{b64}"
 
-    # Важно: просим вернуть ТОЛЬКО подпись, без кавычек и пояснений.
-    # original_caption может помочь, если в посте уже есть контекст/тема.
-    user_text = (
-        "Придумай одну короткую смешную подпись (до 120 символов) к картинке. "
-        "Верни только подпись, без кавычек, без хэштегов, без объяснений."
-    )
-    if original_caption:
-        user_text += f"\nКонтекст/подпись автора поста: {original_caption}"
-
     settings = get_settings()
 
     def _build_messages(
@@ -246,7 +237,7 @@ async def generate_funny_caption(image_bytes: bytes, original_caption: str | Non
             )
         else:
             user_text = (
-                "Придумай одну короткую смешную подпись (до 280 символов) к картинке. "
+                "Придумай одну короткую смешную подпись (до 560 символов) к картинке. "
                 "Верни только подпись, без кавычек, без хэштегов, без объяснений."
             )
         if settings.timeweb_ai_use_post_caption and original_caption:
